@@ -92,8 +92,8 @@ def extract_action_phrases(text: str, key_phrases: list = None):
 
     for kw in action_keywords:
         if kw in lower_text:
-            start = max(0, lower_text.find(kw) - 30)
-            end = min(len(lower_text), lower_text.find(kw) + len(kw) + 40)
+            start = max(0, lower_text.find(kw) - 100)
+            end = min(len(lower_text), lower_text.find(kw) + len(kw) + 60)
             snippet = lower_text[start:end]
 
             # Check if this keyword is negated by a legitimate company disclaimer
@@ -109,6 +109,12 @@ def extract_action_phrases(text: str, key_phrases: list = None):
         for kp in key_phrases:
             kp_low = kp.lower()
             if any(term in kp_low for term in ["fee", "deposit", "pay", "slot", "account", "aadhaar", "urgent"]):
+                # Check if this key phrase appears in a negated anti-scam context
+                kp_pos = lower_text.find(kp_low)
+                if kp_pos != -1:
+                    surrounding = lower_text[max(0, kp_pos - 80):min(len(lower_text), kp_pos + len(kp_low) + 60)]
+                    if any(neg in surrounding for neg in negation_signals):
+                        continue
                 if kp not in detected:
                     detected.append(kp)
 
@@ -134,6 +140,8 @@ def extract_offer_details(offer_text: str) -> dict:
             client = TextAnalyticsClient(
                 endpoint=LANGUAGE_ENDPOINT,
                 credential=AzureKeyCredential(LANGUAGE_API_KEY),
+                connection_timeout=3,
+                read_timeout=4,
             )
 
             # NER
@@ -176,4 +184,4 @@ if __name__ == "__main__":
     result = extract_offer_details(sample_fake)
     print("Extraction Result:")
     for k, v in result.items():
-        print(f"  {k}: {v}")
+        print(f"  {k}: {str(v).encode('ascii', errors='backslashreplace').decode('ascii')}")

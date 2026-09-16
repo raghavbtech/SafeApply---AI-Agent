@@ -6,7 +6,7 @@ Demonstrating GenAI, RAG, Agent Orchestration, Tool Use, and Responsible AI.
 
 import streamlit as st
 import time
-from agent import analyze_job_offer, is_azure_openai_configured
+from agent import analyze_job_offer, is_azure_openai_configured, is_github_models_configured
 from extractor import is_azure_language_configured
 from search_indexer import is_azure_configured as is_azure_search_configured
 
@@ -116,11 +116,17 @@ with st.sidebar:
     st.markdown("Azure Services Integration for Student Evaluation:")
 
     # Service Status Indicators
-    foundry_status = "🟢 Active" if is_azure_openai_configured() else "🟡 Local Fallback Mode"
+    if is_azure_openai_configured():
+        foundry_status = "🟢 Active (Azure AI Foundry)"
+    elif is_github_models_configured():
+        foundry_status = "🟢 Active (Azure GitHub Models)"
+    else:
+        foundry_status = "🟡 Quota Pending / Local Mode"
+
     search_status = "🟢 Active" if is_azure_search_configured() else "🟡 Local RAG Mode"
     lang_status = "🟢 Active" if is_azure_language_configured() else "🟡 Regex Heuristics Mode"
 
-    st.markdown(f"- **Azure AI Foundry (GPT-4o-mini)**: {foundry_status}")
+    st.markdown(f"- **GenAI (GPT-4o-mini)**: {foundry_status}")
     st.markdown(f"- **Azure AI Search (F0 Tier)**: {search_status}")
     st.markdown(f"- **Azure AI Language (F0 Tier)**: {lang_status}")
 

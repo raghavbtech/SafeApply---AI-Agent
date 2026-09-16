@@ -41,13 +41,26 @@ def check_red_flags_rag(offer_text: str, extracted_data: dict = None) -> list:
     Queries Azure AI Search (or local pattern dataset) using RAG retrieval to find
     matching known recruitment fraud patterns.
     """
-    # Build a targeted search query from actions and text
+    offer_lower = offer_text.lower()
+    negation_signals = [
+        "no fee", "never charges", "never ask", "never request", "without any fee",
+        "no security deposit", "there is no fee", "no charges", "free of charge",
+        "does not charge", "will not ask", "zero fee"
+    ]
+    has_anti_fraud_notice = any(neg in offer_lower for neg in negation_signals)
+
+    # Build a clean targeted search query from actions and text
     search_terms = []
     if extracted_data and extracted_data.get("requested_actions"):
-        search_terms.extend(extracted_data["requested_actions"])
-    
-    # Fallback to key segments of the offer text
-    query_string = " ".join(search_terms) if search_terms else offer_text[:200]
+        for act in extracted_data["requested_actions"]:
+            kw = act.split("(")[0].strip().strip("'\"")
+            if len(kw) > 2:
+                search_terms.append(kw)
+
+    raw_query = " ".join(search_terms) if search_terms else offer_text[:120]
+    # Remove special punctuation that confuses search syntax
+    clean_query = re.sub(r'[^\w\s]', ' ', raw_query)
+    query_string = " ".join(clean_query.split()[:12])
 
     # Attempt live Azure AI Search if credentials exist
     if SEARCH_ENDPOINT and SEARCH_API_KEY and "your-search-service" not in SEARCH_ENDPOINT:
@@ -60,9 +73,11 @@ def check_red_flags_rag(offer_text: str, extracted_data: dict = None) -> list:
                 endpoint=SEARCH_ENDPOINT,
                 index_name=SEARCH_INDEX_NAME,
                 credential=credential,
+                connection_timeout=3,
+                read_timeout=4,
             )
             results = client.search(
-                search_text=query_string,
+                search_text=query_string if query_string else "*",
                 select=["id", "category", "pattern", "example_text", "risk_weight"],
                 top=3,
             )
@@ -70,6 +85,8 @@ def check_red_flags_rag(offer_text: str, extracted_data: dict = None) -> list:
             for r in results:
                 score = r.get("@search.score", 0.0)
                 if score > 0.5:
+                    if r["category"] == "upfront_fee" and has_anti_fraud_notice:
+                        continue
                     matches.append({
                         "category": r["category"],
                         "pattern": r["pattern"],
@@ -83,16 +100,7 @@ def check_red_flags_rag(offer_text: str, extracted_data: dict = None) -> list:
 
     # Local fallback RAG retrieval
     patterns = load_cached_patterns()
-    offer_lower = offer_text.lower()
     matches = []
-
-    # Detect legitimate anti-fraud protection notices
-    negation_signals = [
-        "no fee", "never charges", "never ask", "never request", "without any fee",
-        "no security deposit", "there is no fee", "no charges", "free of charge",
-        "does not charge", "will not ask", "zero fee"
-    ]
-    has_anti_fraud_notice = any(neg in offer_lower for neg in negation_signals)
 
     # Specific fraud trigger phrases (actionable demands)
     actionable_triggers = {

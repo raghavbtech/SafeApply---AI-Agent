@@ -5,6 +5,7 @@ adhering to Responsible AI principles.
 """
 
 import os
+import re
 import json
 from dotenv import load_dotenv
 from extractor import extract_offer_details
@@ -17,6 +18,9 @@ AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", os.getenv("FOUNDRY_EN
 AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY", os.getenv("FOUNDRY_API_KEY", ""))
 AZURE_OPENAI_DEPLOYMENT_NAME = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o-mini")
 AZURE_OPENAI_API_VERSION = os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview")
+
+# Option 2: GitHub Models (Azure-hosted GPT-4o-mini inference endpoint)
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 
 RESPONSIBLE_AI_DISCLAIMER = (
     "SafeApply is an AI-powered advisory tool designed to help students identify common recruitment scam indicators. "
@@ -35,20 +39,71 @@ def is_azure_openai_configured() -> bool:
     )
 
 
-def synthesize_with_azure_openai(extracted_data: dict, rag_results: list, domain_check: dict, salary_check: dict) -> dict:
-    """Synthesize results using Azure AI Foundry / Azure OpenAI GPT model."""
-    from openai import AzureOpenAI
-
-    client = AzureOpenAI(
-        azure_endpoint=AZURE_OPENAI_ENDPOINT,
-        api_key=AZURE_OPENAI_API_KEY,
-        api_version=AZURE_OPENAI_API_VERSION,
+def is_github_models_configured() -> bool:
+    """Check if GitHub Models token is set for Azure-hosted model inference."""
+    return bool(
+        GITHUB_TOKEN
+        and len(GITHUB_TOKEN.strip()) > 15
+        and not GITHUB_TOKEN.startswith("your_")
     )
+
+
+def is_azure_foundry_configured() -> bool:
+    """Check if Azure AI Foundry / OpenAI endpoint is configured with a real key."""
+    return bool(
+        AZURE_OPENAI_ENDPOINT
+        and AZURE_OPENAI_API_KEY
+        and "your-foundry-resource" not in AZURE_OPENAI_ENDPOINT
+        and "your_azure_openai_api_key" not in AZURE_OPENAI_API_KEY
+    )
+
+
+def is_genai_active() -> bool:
+    """Check if either Azure AI Foundry, Azure OpenAI, or GitHub Models is active."""
+    return is_azure_foundry_configured() or is_github_models_configured()
+
+
+def synthesize_with_genai(extracted_data: dict, rag_results: list, domain_check: dict, salary_check: dict) -> tuple:
+    """Synthesize results using Azure AI Foundry (Phi-4-mini-instruct / GPT) or Azure OpenAI."""
+    from openai import OpenAI, AzureOpenAI
+
+    endpoint = AZURE_OPENAI_ENDPOINT.rstrip("/")
+    if "services.ai.azure.com" in endpoint or "models.ai.azure.com" in endpoint:
+        base_url = endpoint if endpoint.endswith("/models") else f"{endpoint}/models"
+        client = OpenAI(
+            base_url=base_url,
+            api_key=AZURE_OPENAI_API_KEY,
+        )
+        model_name = AZURE_OPENAI_DEPLOYMENT_NAME
+        mode = f"Live Azure AI Foundry ({model_name})"
+    elif is_azure_openai_configured():
+        client = AzureOpenAI(
+            azure_endpoint=AZURE_OPENAI_ENDPOINT,
+            api_key=AZURE_OPENAI_API_KEY,
+            api_version=AZURE_OPENAI_API_VERSION,
+        )
+        model_name = AZURE_OPENAI_DEPLOYMENT_NAME
+        mode = f"Live Azure OpenAI ({model_name})"
+    elif is_github_models_configured():
+        client = OpenAI(
+            base_url="https://models.github.ai/inference",
+            api_key=GITHUB_TOKEN.strip(),
+        )
+        model_name = "gpt-4o-mini"
+        mode = "Live Azure-Hosted GitHub Models (GPT-4o-mini)"
+    else:
+        raise ValueError("No GenAI provider configured.")
 
     prompt = f"""You are a recruitment fraud risk assessor. Given the following extracted job offer
 details and analysis results, provide a risk verdict (Low/Medium/High) and a clear,
 plain-English explanation citing specific red flags. Be advisory, not definitive.
 Do not make absolute accusations against any named company.
+
+CRITICAL RESPONSIBLE AI EVALUATION RULES:
+1. PROTECTIVE DISCLAIMERS: If the offer states that the company "never charges any fee", "does not ask for money", or "no fee is required", this is a legitimate corporate anti-fraud notice, NOT an upfront fee solicitation! Do NOT flag it as a scam.
+2. LEGITIMATE OFFERS: If domain_verification is "VERIFIED_DOMAIN" (e.g. microsoft.com, infosys.com, razorpay.com) and no upfront payments or sensitive banking data are demanded, the risk_level MUST be "Low" (risk_score <= 25).
+3. HIGH RISK OFFERS: Assign "High" risk ONLY when there is clear affirmative fraud: candidate is required to pay fees/deposits (via UPI/transfer), upload unredacted Aadhaar/debit cards, or contact exclusively via unverified Telegram/chat handles.
+4. AMBIGUOUS OFFERS: Assign "Medium" risk (risk_score strictly between 30 and 55) if an informal recruiter uses generic email (@gmail/@yahoo) or short deadline, but does NOT ask for money or passwords. Do NOT assign High risk.
 
 Extracted data:
 {json.dumps(extracted_data, indent=2)}
@@ -72,26 +127,48 @@ Respond strictly in valid JSON format with these exact keys:
 """
 
     response = client.chat.completions.create(
-        model=AZURE_OPENAI_DEPLOYMENT_NAME,
+        model=model_name,
         messages=[
             {"role": "system", "content": "You are SafeApply, a Responsible AI recruitment scam detector. Always return valid JSON."},
             {"role": "user", "content": prompt}
         ],
         temperature=0.2,
-        response_format={"type": "json_object"}
     )
 
-    content = response.choices[0].message.content
+    content = response.choices[0].message.content.strip()
+    # Strip markdown fences if present
+    if content.startswith("```"):
+        content = re.sub(r"^```(?:json)?\s*", "", content)
+        content = re.sub(r"\s*```$", "", content).strip()
+
     try:
         parsed = json.loads(content)
-        return parsed
+        verdict = str(parsed.get("risk_level", "Medium")).strip().capitalize()
+        if "High" in verdict:
+            verdict = "High"
+        elif "Low" in verdict:
+            verdict = "Low"
+        else:
+            verdict = "Medium"
+        parsed["risk_level"] = verdict
+
+        # Align numerical score consistently with verdict
+        raw_score = int(float(parsed.get("risk_score", 50)))
+        if verdict == "High":
+            parsed["risk_score"] = max(70, raw_score)
+        elif verdict == "Low":
+            parsed["risk_score"] = min(20, raw_score) if raw_score > 0 else 10
+        else:
+            parsed["risk_score"] = raw_score if 30 <= raw_score <= 60 else 45
+
+        return parsed, mode
     except Exception:
         return {
             "risk_level": "Medium",
             "risk_score": 50,
             "explanation": content,
             "identified_red_flags": ["Automated extraction completed, manual review advised."]
-        }
+        }, mode
 
 
 def synthesize_fallback(extracted_data: dict, rag_results: list, domain_check: dict, salary_check: dict) -> dict:
@@ -227,12 +304,11 @@ def analyze_job_offer(offer_text: str) -> dict:
     )
 
     # Step 6: GenAI Synthesis Layer
-    if is_azure_openai_configured():
+    if is_genai_active():
         try:
-            synthesis = synthesize_with_azure_openai(extracted_data, rag_results, domain_check, salary_check)
-            mode = "Live Azure AI Foundry (GPT-4o-mini)"
+            synthesis, mode = synthesize_with_genai(extracted_data, rag_results, domain_check, salary_check)
         except Exception as e:
-            print(f"[Agent Synthesis Error] Azure OpenAI call failed: {e}. Using deterministic engine.")
+            print(f"[Agent Synthesis Error] GenAI call failed: {e}. Using deterministic engine.")
             synthesis = synthesize_fallback(extracted_data, rag_results, domain_check, salary_check)
             mode = "Deterministic Advisory Engine (API Fallback)"
     else:
