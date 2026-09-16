@@ -90,8 +90,8 @@ SafeApply is architected to leverage Azure's Free (F0) tiers to remain well with
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/<your-username>/SafeApply.git
-cd SafeApply
+git clone https://github.com/raghavbtech/SafeApply---AI-Agent.git
+cd SafeApply---AI-Agent
 ```
 
 ### 2. Install Dependencies
