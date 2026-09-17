@@ -410,11 +410,11 @@ def run_grounding_tests():
     return passed == len(GROUNDING_CASES)
 
 
-def test_rag_category_coverage():
+def _run_rag_category_coverage_check() -> bool:
     """
-    Confirm that a deliberately multi-signal scam retrieves the major
-    evidence-supported fraud categories rather than several duplicate records
-    from only one category.
+    Execute the RAG category-coverage check and return True/False.
+
+    This helper is used both by pytest and by the standalone test runner.
     """
     sample = """
     Congratulations on your direct selection at Infosys India.
@@ -453,7 +453,6 @@ def test_rag_category_coverage():
         print("Missing categories:", ", ".join(sorted(missing)))
         return False
 
-    # Also verify that each returned category carries observed evidence.
     missing_evidence = [
         match.get("category", "unknown")
         for match in matches
@@ -472,9 +471,15 @@ def test_rag_category_coverage():
     return True
 
 
-def test_ml_classifier():
+def test_rag_category_coverage():
+    """Pytest wrapper: pytest tests should assert and return None."""
+    assert _run_rag_category_coverage_check() is True
+
+def _run_ml_classifier_check() -> bool:
     """
-    Test the EMSCAD machine learning classifier on distinct fraud and legitimate samples.
+    Execute the EMSCAD classifier check and return True/False.
+
+    This helper is used both by pytest and by the standalone test runner.
     """
     print("\n" + "=" * 96)
     print("EMSCAD MACHINE LEARNING CLASSIFIER TEST")
@@ -493,12 +498,19 @@ def test_ml_classifier():
     fraud_res = detect_fraud_ml(fraud_sample)
     legit_res = detect_fraud_ml(legit_sample)
 
-    print(f"Scam Sample Probability:  {fraud_res['fraud_probability_pct']}% | Verdict: {fraud_res['verdict']} | Level: {fraud_res['risk_level']}")
+    print(
+        f"Scam Sample Probability:  {fraud_res['fraud_probability_pct']}% | "
+        f"Verdict: {fraud_res['verdict']} | Level: {fraud_res['risk_level']}"
+    )
     print(f"Scam Detected Tokens:     {fraud_res['top_risk_tokens']}")
-    print(f"Legit Sample Probability: {legit_res['fraud_probability_pct']}% | Verdict: {legit_res['verdict']} | Level: {legit_res['risk_level']}")
+    print(
+        f"Legit Sample Probability: {legit_res['fraud_probability_pct']}% | "
+        f"Verdict: {legit_res['verdict']} | Level: {legit_res['risk_level']}"
+    )
     print(f"Legit Detected Tokens:    {legit_res['top_legit_tokens']}")
 
     passed = True
+
     if fraud_res["ml_fraud_probability"] < 0.70:
         print("[FAIL] Scam sample probability should be >= 70%")
         passed = False
@@ -507,21 +519,36 @@ def test_ml_classifier():
         print("[FAIL] Legit sample probability should be <= 30%")
         passed = False
 
-    required_keys = ["is_flagged", "ml_fraud_probability", "risk_level", "verdict", "top_risk_tokens"]
-    for k in required_keys:
-        if k not in fraud_res:
-            print(f"[FAIL] Missing key {k} in ML output")
+    required_keys = [
+        "is_flagged",
+        "ml_fraud_probability",
+        "risk_level",
+        "verdict",
+        "top_risk_tokens",
+    ]
+
+    for key in required_keys:
+        if key not in fraud_res:
+            print(f"[FAIL] Missing key {key} in ML output")
             passed = False
 
-    print(f"ML Classifier Unit Test: {'PASS [OK]' if passed else 'FAIL [X]'}")
+    print(
+        f"ML Classifier Unit Test: "
+        f"{'PASS [OK]' if passed else 'FAIL [X]'}"
+    )
+
     return passed
 
 
+def test_ml_classifier():
+    """Pytest wrapper: pytest tests should assert and return None."""
+    assert _run_ml_classifier_check() is True
+
 def run_all_tests():
-    ml_ok = test_ml_classifier()
+    ml_ok = _run_ml_classifier_check()
     benchmark_results = run_benchmark()
     grounding_ok = run_grounding_tests()
-    rag_coverage_ok = test_rag_category_coverage()
+    rag_coverage_ok = _run_rag_category_coverage_check()
 
     benchmark_ok = all(
         item["status"].startswith("PASS")
