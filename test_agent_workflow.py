@@ -63,6 +63,21 @@ def test_custom_email_ingestion():
     assert new_email["status"] == "unscanned"
 
 
+def test_eml_parsing_and_live_ingestion():
+    """Test parsing .eml content and ingesting into mailbox."""
+    from mail_agent import parse_eml_content
+    raw_eml = b"From: Campus Recruiting <recruiting@amazon.com>\nSubject: Internship Offer - SDE\n\nWe are pleased to offer you an internship role."
+    parsed = parse_eml_content(raw_eml)
+    assert parsed["sender"] == "recruiting@amazon.com"
+    assert "Internship Offer" in parsed["subject"]
+    assert parsed["is_recruitment"] is True
+
+    mgr = MailboxManager()
+    added = mgr.ingest_live_emails([parsed])
+    assert added == 1
+    assert mgr.get_email_by_id(parsed["id"]) is not None
+
+
 def test_security_quarantine_workflow():
     """Test quarantining high-risk emails and audit logging."""
     demo_scam_email = {
@@ -159,6 +174,8 @@ if __name__ == "__main__":
     print("PASS: test_mailbox_manager_initialization")
     test_custom_email_ingestion()
     print("PASS: test_custom_email_ingestion")
+    test_eml_parsing_and_live_ingestion()
+    print("PASS: test_eml_parsing_and_live_ingestion")
     test_security_quarantine_workflow()
     print("PASS: test_security_quarantine_workflow")
     test_verification_checklist_generation()

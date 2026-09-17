@@ -22,7 +22,12 @@ from agent import (
 )
 from extractor import is_azure_language_configured
 from search_indexer import is_azure_configured as is_azure_search_configured
-from mail_agent import MailboxManager, DEFAULT_DEMO_EMAILS
+from mail_agent import (
+    MailboxManager,
+    DEFAULT_DEMO_EMAILS,
+    fetch_live_emails,
+    parse_eml_content,
+)
 from security_actions import (
     quarantine_email,
     restore_email_from_vault,
@@ -299,9 +304,9 @@ with tab_mail:
     st.write("")
 
     # Action Toolbar
-    act_col1, act_col2, act_col3 = st.columns([2, 2, 2])
+    act_col1, act_col2, act_col3, act_col4 = st.columns([1.8, 2.5, 2.2, 1.5])
     with act_col1:
-        if st.button("⚡ Scan Recruitment Inbox", type="primary", use_container_width=True):
+        if st.button("⚡ Scan All Inbox", type="primary", use_container_width=True):
             with st.spinner("Agent scanning inbox across Rules, EMSCAD ML, Azure Search RAG, and Azure Foundry..."):
                 prog_bar = st.progress(0)
                 unscanned_list = [e for e in mailbox.get_recruitment_emails() if e.get("status") == "unscanned"]
@@ -316,15 +321,79 @@ with tab_mail:
                     st.rerun()
 
     with act_col2:
-        with st.popover("➕ Add Email to Inbox", use_container_width=True):
-            st.markdown("#### Ingest Custom Recruitment Email")
+        with st.popover("🔗 Connect Gmail / Outlook", use_container_width=True):
+            st.markdown("#### 📬 Connect Live Mailbox (IMAP SSL)")
+            st.caption("Securely fetch real unread/recent recruitment emails from your inbox.")
+
+            provider = st.selectbox("Email Provider", ["Gmail", "Outlook / Hotmail", "Yahoo", "Custom Server"])
+            live_user = st.text_input("Email Address", placeholder="e.g. yourname@gmail.com")
+            live_pass = st.text_input("Password or App Password", type="password", help="For Gmail, generate a 16-character App Password.")
+
+            custom_srv = None
+            custom_port = 993
+            if provider == "Custom Server":
+                custom_srv = st.text_input("IMAP Server Host", "imap.yourserver.com")
+                custom_port = st.number_input("IMAP Port", value=993)
+
+            fetch_count = st.slider("Max emails to fetch", min_value=3, max_value=25, value=10)
+
+            if provider == "Gmail":
+                st.info(
+                    "💡 **Gmail Setup (takes 30 seconds):**\n\n"
+                    "1. Visit [Google Account Security](https://myaccount.google.com/security)\n"
+                    "2. Verify **2-Step Verification** is turned ON\n"
+                    "3. Open **App passwords** (search 'App passwords' in Google settings)\n"
+                    "4. Create an app named `SafeApply` and paste the 16-letter password here."
+                )
+            elif provider == "Outlook / Hotmail":
+                st.caption("Works with your Microsoft Account password or an Outlook App Password.")
+
+            if st.button("📥 Connect & Ingest Live Emails", type="primary", use_container_width=True):
+                if not live_user or not live_pass:
+                    st.error("Please enter both email address and password / app password.")
+                else:
+                    with st.spinner(f"Connecting to {provider} via IMAP SSL and fetching messages..."):
+                        try:
+                            live_fetched = fetch_live_emails(
+                                provider=provider,
+                                username=live_user,
+                                password_or_app_token=live_pass,
+                                max_emails=fetch_count,
+                                server=custom_srv,
+                                port=custom_port,
+                            )
+                            if not live_fetched:
+                                st.warning("Connected successfully, but no messages were returned from INBOX.")
+                            else:
+                                count = mailbox.ingest_live_emails(live_fetched)
+                                st.success(f"Fetched {len(live_fetched)} emails ({count} new added to SafeApply)!")
+                                st.session_state.selected_email_id = live_fetched[0]["id"]
+                                st.rerun()
+                        except Exception as ex:
+                            st.error(f"Connection failed: {str(ex)}")
+
+    with act_col3:
+        with st.popover("➕ Add / Upload Email", use_container_width=True):
+            st.markdown("#### 📁 Import Email File (.eml)")
+            st.caption("Export any email from Gmail or Outlook ('Download message') and drop it here.")
+            eml_file = st.file_uploader("Choose an .eml file", type=["eml"])
+            if eml_file is not None:
+                if st.button("Ingest Uploaded .EML File", type="primary"):
+                    parsed_eml = parse_eml_content(eml_file.read())
+                    mailbox.emails.insert(0, parsed_eml)
+                    st.session_state.selected_email_id = parsed_eml["id"]
+                    st.success(f"Uploaded and parsed email '{parsed_eml['subject'][:35]}' into inbox!")
+                    st.rerun()
+
+            st.divider()
+            st.markdown("#### ✍️ Or Paste Manual Message")
             new_sender = st.text_input("Sender Email", "hr.recruiter@company.com")
             new_name = st.text_input("Sender Name", "Talent Team")
             new_company = st.text_input("Company Name", "Tech Solutions")
             new_role = st.text_input("Role Title", "Software Engineer")
             new_subj = st.text_input("Subject", "Job Opportunity - Software Engineer")
-            new_body = st.text_area("Email Body", "We are pleased to offer you a role...", height=120)
-            if st.button("Ingest into Mailbox", type="primary"):
+            new_body = st.text_area("Email Body", "We are pleased to offer you a role...", height=90)
+            if st.button("Ingest Pasted Email", type="primary"):
                 if new_body.strip():
                     created = mailbox.add_custom_email(
                         sender=new_sender,
@@ -338,11 +407,11 @@ with tab_mail:
                     st.success(f"Added email {created['id']} to inbox!")
                     st.rerun()
 
-    with act_col3:
-        if st.button("🔄 Reset Demo Inbox", use_container_width=True):
+    with act_col4:
+        if st.button("🔄 Reset Demo", use_container_width=True):
             st.session_state.mailbox_mgr = MailboxManager()
             st.session_state.selected_email_id = "EML-001"
-            st.success("Reset demo inbox to default state.")
+            st.success("Reset demo inbox.")
             st.rerun()
 
     st.divider()

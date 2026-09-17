@@ -338,6 +338,17 @@ class MailboxManager:
 
         return self.emails
 
+
+    def ingest_live_emails(self, live_emails: List[Dict[str, Any]]) -> int:
+        """Insert fetched live emails at the top of the mailbox."""
+        count = 0
+        existing_ids = {e["id"] for e in self.emails}
+        for email_item in live_emails:
+            if email_item["id"] not in existing_ids:
+                self.emails.insert(0, email_item)
+                count += 1
+        return count
+
     def update_email_status(self, email_id: str, new_status: str):
         """Update the status of an email (e.g., 'quarantined', 'applied')."""
         email = self.get_email_by_id(email_id)
@@ -366,3 +377,143 @@ class MailboxManager:
             "quarantined": len(quarantined),
             "applied": len(applied),
         }
+
+
+# =========================================================
+# LIVE IMAP & .EML MAIL CONNECTOR
+# =========================================================
+
+import imaplib
+import email as email_pkg
+import email.message
+from email.header import decode_header
+
+
+def _decode_mime_header(header_val: str) -> str:
+    """Decode encoded MIME header fields."""
+    if not header_val:
+        return ""
+    decoded_parts = decode_header(header_val)
+    result = []
+    for part, enc in decoded_parts:
+        if isinstance(part, bytes):
+            try:
+                result.append(part.decode(enc or "utf-8", errors="replace"))
+            except Exception:
+                result.append(part.decode("utf-8", errors="replace"))
+        else:
+            result.append(str(part))
+    return "".join(result)
+
+
+def _extract_body_from_email_message(msg: email_pkg.message.Message) -> str:
+    """Extract plain text or HTML body from python email Message."""
+    body = ""
+    if msg.is_multipart():
+        for part in msg.walk():
+            ctype = part.get_content_type()
+            cdispo = str(part.get("Content-Disposition"))
+            if ctype == "text/plain" and "attachment" not in cdispo:
+                payload = part.get_payload(decode=True)
+                if payload:
+                    body = payload.decode(part.get_content_charset() or "utf-8", errors="replace")
+                    break
+            elif ctype == "text/html" and not body and "attachment" not in cdispo:
+                payload = part.get_payload(decode=True)
+                if payload:
+                    raw_html = payload.decode(part.get_content_charset() or "utf-8", errors="replace")
+                    body = re.sub(r"<[^>]+>", " ", raw_html)
+    else:
+        payload = msg.get_payload(decode=True)
+        if payload:
+            body = payload.decode(msg.get_content_charset() or "utf-8", errors="replace")
+
+    return re.sub(r"\s+", " ", body).strip()
+
+
+def parse_eml_content(raw_bytes: bytes) -> Dict[str, Any]:
+    """Parse an uploaded .eml file into a SafeApply email dictionary."""
+    msg = email_pkg.message_from_bytes(raw_bytes)
+    subject = _decode_mime_header(msg.get("Subject", "No Subject"))
+    sender = _decode_mime_header(msg.get("From", "Unknown Sender"))
+    date_str = msg.get("Date", datetime.now().strftime("%Y-%m-%d %I:%M %p"))
+    body = _extract_body_from_email_message(msg)
+
+    sender_match = re.search(r"<([^>]+)>", sender)
+    sender_email = sender_match.group(1) if sender_match else sender
+    sender_name = sender.replace(f"<{sender_email}>", "").strip() or sender_email
+
+    is_rec = is_recruitment_email(subject, body, sender)
+
+    return {
+        "id": f"EML-UPLOAD-{datetime.now().strftime('%M%S')}",
+        "sender": sender_email,
+        "sender_name": sender_name,
+        "subject": subject,
+        "date": str(date_str)[:30],
+        "body": body,
+        "status": "unscanned" if is_rec else "ignored",
+        "is_recruitment": is_rec,
+        "company_name": "Unknown",
+        "role_title": "Not Specified",
+        "risk_score": None,
+        "risk_level": None,
+        "analysis": None,
+    }
+
+
+def fetch_live_emails(
+    provider: str,
+    username: str,
+    password_or_app_token: str,
+    max_emails: int = 10,
+    server: Optional[str] = None,
+    port: int = 993,
+) -> List[Dict[str, Any]]:
+    """
+    Connect to Gmail, Outlook, or custom IMAP server via SSL and fetch recent emails.
+    """
+    provider_servers = {
+        "Gmail": ("imap.gmail.com", 993),
+        "Outlook / Hotmail": ("outlook.office365.com", 993),
+        "Yahoo": ("imap.mail.yahoo.com", 993),
+    }
+
+    if server:
+        imap_host = server
+        imap_port = port
+    else:
+        imap_host, imap_port = provider_servers.get(provider, ("imap.gmail.com", 993))
+
+    mail = imaplib.IMAP4_SSL(imap_host, imap_port)
+    try:
+        mail.login(username.strip(), password_or_app_token.strip())
+        mail.select("INBOX", readonly=True)
+
+        status, messages = mail.search(None, "ALL")
+        if status != "OK" or not messages[0]:
+            return []
+
+        msg_ids = messages[0].split()
+        recent_ids = msg_ids[-max_emails:]
+        recent_ids.reverse()
+
+        fetched_emails = []
+        for mid in recent_ids:
+            res_status, msg_data = mail.fetch(mid, "(RFC822)")
+            if res_status != "OK" or not msg_data:
+                continue
+
+            raw_email = msg_data[0][1]
+            if isinstance(raw_email, bytes):
+                parsed = parse_eml_content(raw_email)
+                parsed["id"] = f"LIVE-{mid.decode()}"
+                fetched_emails.append(parsed)
+
+        return fetched_emails
+    finally:
+        try:
+            mail.close()
+            mail.logout()
+        except Exception:
+            pass
