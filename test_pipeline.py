@@ -18,7 +18,8 @@ import time
 
 from agent import analyze_job_offer
 from extractor import extract_offer_details
-from tools import check_red_flags_rag
+from tools import check_red_flags_rag, detect_fraud_ml
+from ml_classifier import predict_job_offer
 
 
 TEST_CASES = [
@@ -471,7 +472,53 @@ def test_rag_category_coverage():
     return True
 
 
+def test_ml_classifier():
+    """
+    Test the EMSCAD machine learning classifier on distinct fraud and legitimate samples.
+    """
+    print("\n" + "=" * 96)
+    print("EMSCAD MACHINE LEARNING CLASSIFIER TEST")
+    print("=" * 96)
+
+    fraud_sample = (
+        "URGENT HIRING: Work from Home data entry clerk. Earn cash Rs 75,000 monthly. "
+        "No interview required. Direct selection. Remit registration fee via link."
+    )
+    legit_sample = (
+        "We are hiring a Software Engineering Intern at Microsoft India. "
+        "Our engineering team develops scalable cloud services for global enterprise clients. "
+        "Please review the formal job description and company profile on our careers portal."
+    )
+
+    fraud_res = detect_fraud_ml(fraud_sample)
+    legit_res = detect_fraud_ml(legit_sample)
+
+    print(f"Scam Sample Probability:  {fraud_res['fraud_probability_pct']}% | Verdict: {fraud_res['verdict']} | Level: {fraud_res['risk_level']}")
+    print(f"Scam Detected Tokens:     {fraud_res['top_risk_tokens']}")
+    print(f"Legit Sample Probability: {legit_res['fraud_probability_pct']}% | Verdict: {legit_res['verdict']} | Level: {legit_res['risk_level']}")
+    print(f"Legit Detected Tokens:    {legit_res['top_legit_tokens']}")
+
+    passed = True
+    if fraud_res["ml_fraud_probability"] < 0.70:
+        print("[FAIL] Scam sample probability should be >= 70%")
+        passed = False
+
+    if legit_res["ml_fraud_probability"] > 0.30:
+        print("[FAIL] Legit sample probability should be <= 30%")
+        passed = False
+
+    required_keys = ["is_flagged", "ml_fraud_probability", "risk_level", "verdict", "top_risk_tokens"]
+    for k in required_keys:
+        if k not in fraud_res:
+            print(f"[FAIL] Missing key {k} in ML output")
+            passed = False
+
+    print(f"ML Classifier Unit Test: {'PASS [OK]' if passed else 'FAIL [X]'}")
+    return passed
+
+
 def run_all_tests():
+    ml_ok = test_ml_classifier()
     benchmark_results = run_benchmark()
     grounding_ok = run_grounding_tests()
     rag_coverage_ok = test_rag_category_coverage()
@@ -485,6 +532,10 @@ def run_all_tests():
     print("FINAL TEST SUMMARY")
     print("=" * 96)
     print(
+        "ML Classifier:",
+        "PASS" if ml_ok else "FAIL",
+    )
+    print(
         "Benchmark:",
         "PASS" if benchmark_ok else "FAIL",
     )
@@ -497,7 +548,7 @@ def run_all_tests():
         "PASS" if rag_coverage_ok else "FAIL",
     )
 
-    all_ok = benchmark_ok and grounding_ok and rag_coverage_ok
+    all_ok = ml_ok and benchmark_ok and grounding_ok and rag_coverage_ok
 
     print(
         "Overall:",

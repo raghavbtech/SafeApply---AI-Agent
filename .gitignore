@@ -26,3 +26,6 @@ dist/
 .DS_Store
 Thumbs.db
 *.log
+
+# Large Datasets
+DataSet.csv

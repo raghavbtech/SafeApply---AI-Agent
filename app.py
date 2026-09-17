@@ -166,15 +166,18 @@ with st.sidebar:
         f"<div class='status-line'><b>Language</b> — {lang_status}</div>",
         unsafe_allow_html=True,
     )
+    st.markdown(
+        f"<div class='status-line'><b>ML Classifier</b> — 🟢 Active (EMSCAD 17.8k)</div>",
+        unsafe_allow_html=True,
+    )
 
     st.divider()
-    st.caption("AI-103 concepts demonstrated")
+    st.caption("4-Pillar Detection Architecture")
     st.markdown(
-        "- GenAI grounded explanation\n"
-        "- Evidence-grounded RAG retrieval\n"
-        "- Agent orchestration\n"
-        "- Domain & salary tool use\n"
-        "- Responsible AI guardrails"
+        "1. **Rules Engine** — Domain & salary sanity\n"
+        "2. **ML Classifier** — EMSCAD statistical model\n"
+        "3. **Azure Search RAG** — Known & historical scams\n"
+        "4. **Foundry GenAI** — Grounded explanation"
     )
 
     st.divider()
@@ -352,6 +355,7 @@ if analyze_button:
                 "RAG red-flag checker",
                 "Domain verification",
                 "Salary sanity check",
+                "EMSCAD ML Classifier",
             ]
         )
 
@@ -413,6 +417,27 @@ if analyze_button:
                 f"**Claimed compensation** — {s_check.get('claimed_salary', 'N/A')}"
             )
             st.caption(s_check.get("message", ""))
+
+        with tool_tabs[3]:
+            ml_out = result["tool_outputs"].get("ml_classifier", {})
+            ml_prob = ml_out.get("fraud_probability_pct", 0.0)
+            ml_risk = ml_out.get("risk_level", "Low")
+            ml_verdict = ml_out.get("verdict", "N/A")
+
+            mcol1, mcol2 = st.columns([1, 2])
+            with mcol1:
+                st.metric("EMSCAD Fraud Probability", f"{ml_prob:.1f}%")
+                st.markdown(f"**ML Assessment**: `{ml_verdict}`")
+                st.caption(f"Optimal Threshold: `{ml_out.get('optimal_threshold', 0.70)}`")
+            with mcol2:
+                st.progress(min(max(float(ml_prob) / 100.0, 0.0), 1.0))
+                risk_tokens = ml_out.get("top_risk_tokens", [])
+                legit_tokens = ml_out.get("top_legit_tokens", [])
+                if risk_tokens:
+                    st.markdown(f"**Detected Scam Signals**: " + ", ".join([f"`{t}`" for t in risk_tokens]))
+                if legit_tokens:
+                    st.markdown(f"**Detected Corporate Legitimacy Signals**: " + ", ".join([f"`{t}`" for t in legit_tokens]))
+                st.caption(f"Model: {ml_out.get('model_version', 'SafeApply-EMSCAD')} · Trained on 17,880 postings (4.84% fraud baseline)")
 
         st.markdown(
             f"""

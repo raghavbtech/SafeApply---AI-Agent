@@ -148,21 +148,16 @@ SafeApply must report only the bank-account request. It must not introduce unsup
 | **Risk Engine** | Python | Local deterministic logic | Calculates reproducible Low / Medium / High risk score from verified evidence |
 | **Domain Verification** | Python rules | Custom Agent Tool | Checks public domains, known corporate domains, suspicious naming, and unverified professional domains |
 | **Salary Sanity Check** | Python rules | Custom Agent Tool | Detects compensation claims that are implausible for the stated role |
+| **ML Classifier** | Scikit-learn + Joblib | Local inference engine | Calibrated probabilistic fraud classifier trained on 17,880 EMSCAD job postings (4.84% imbalance) |
 | **Frontend** | Streamlit | Local / deployable web app | Interactive analysis dashboard and test presets |
 
 ---
 
-## 🧠 RAG Knowledge Base
+## 🧠 RAG Knowledge Base & EMSCAD Real-World Cases
 
-The current knowledge base contains **20 curated pattern records across 7 categories**:
-
-- `upfront_fee`
-- `urgency_pressure`
-- `domain_mismatch`
-- `salary_ratio`
-- `premature_personal_info`
-- `vague_role_process`
-- `fake_check_equipment`
+The Azure AI Search knowledge base contains **35 curated pattern records**:
+- **20 Core Taxonomy Patterns**: Covering `upfront_fee`, `urgency_pressure`, `domain_mismatch`, `salary_ratio`, `premature_personal_info`, `vague_role_process`, and `fake_check_equipment`.
+- **15 Authentic EMSCAD Historical Cases**: Curated real-world fraud examples from the EMSCAD dataset representing spoofed offshore engineering contracts, work-from-home administrative clerk bait, medical billing fraud, check re-routing, and virtual call agent schemes.
 
 Patterns are deliberately kept as narrow and atomic as possible so a retrieved document does not unnecessarily combine unrelated risk claims.
 
@@ -173,6 +168,64 @@ SafeApply first identifies categories that are directly supported by evidence in
 This prevents one high-scoring fraud category from crowding other relevant categories out of the search result set.
 
 `SAFEAPPLY_TOP_K` controls the maximum number of grounded RAG references returned to the agent.
+
+---
+
+## 📊 EMSCAD Machine Learning Pipeline (EDA, Preprocessing, & Modeling)
+
+SafeApply integrates an empirical Machine Learning model trained on the standard **EMSCAD (Employment Scam Aegean Dataset)**.
+
+### 1. Dataset Profile & Severe Class Imbalance
+- **Total Postings**: 17,880 real job advertisements
+- **Legitimate Postings**: 17,014 (95.16%)
+- **Fraudulent Postings**: 866 (4.84%)
+- **Imbalance Ratio**: 19.6 : 1
+- **Critical Implication**: Trivial classification accuracy (95.16%) is misleading. Evaluation strictly optimizes **Fraud Recall, Precision, F1-Score, PR-AUC, and ROC-AUC**.
+
+### 2. Key EDA Findings & Empirical Risk Signals
+- **Absence of Company Logo (`has_company_logo`)**: Postings without a logo have a **15.93% fraud rate** vs **1.99%** for postings with a logo (an 8x risk disparity).
+- **Missing Company Profile**: Over **67.8%** of fraudulent postings omit the company profile entirely (median characters = 0 for scams vs 640 for legitimate).
+- **Remote / Telecommuting Work**: Remote postings have an **8.34% fraud rate** vs 4.69% for on-site positions.
+- **Target Industries**: Oil & Energy (38.0% industry fraud rate), Accounting (35.8%), Hospital & Health Care (10.3%).
+- **Target Job Functions**: Administrative (18.9% fraud rate), Engineering (8.4%).
+- **Top Discriminative Fraud Vocabulary**: `link`, `data entry`, `earn`, `clerk`, `cash`, `subsea`, `aptitude`.
+- **Top Corporate Legitimacy Vocabulary**: `company profile`, `companies`, `team`, `clients`, `digital`, `recruitment`.
+
+### 3. Cleaning, Preprocessing & Stratified Splitting
+- **HTML & Obfuscation Stripping**: Stripped HTML tags (`<p>`, `<b>`), unescaped entities, and normalized masked artifact tokens (`#URL_...#`, `#EMAIL_...#`, `#PHONE_...#`).
+- **Zero-Leakage Guarantee**: Internal sampling column `in_balanced_dataset` was explicitly dropped.
+- **Stratified Partitioning**: 70% Train (12,516 samples), 15% Validation (2,682 samples), 15% Test (2,682 samples), maintaining exact 4.84% positive class across all splits.
+
+### 4. Model Benchmark & Test Set Evaluation
+Multiple baseline and hybrid architectures were trained and compared:
+
+| Model Architecture | Validation F1 | Validation Recall | Validation Precision | Val PR-AUC | Val ROC-AUC |
+|---|---|---|---|---|---|
+| **TF-IDF + Logistic Regression (Balanced)** | **0.8000** | **0.9231** | **0.7059** | **0.9285** | **0.9903** |
+| **TF-IDF + Complement Naive Bayes** | 0.4041 | 0.9154 | 0.2593 | 0.7504 | 0.9629 |
+| **Hybrid (Text + Metadata) + LogReg** | 0.7147 | 0.9154 | 0.5862 | 0.9216 | 0.9932 |
+
+- **Decision Threshold Optimization**: The optimal threshold $\tau = 0.70$ was calibrated on the validation set to maximize F1 and minimize false alarms.
+- **Final Evaluation on Unseen Test Set (2,682 Postings)**:
+  - **Fraud Precision**: **89.47%**
+  - **Fraud Recall**: **78.46%** (102 / 130 unseen scams detected)
+  - **Fraud F1-Score**: **0.8361**
+  - **PR-AUC (Average Precision)**: **0.9112**
+  - **ROC-AUC**: **0.9902**
+  - **False Positive Rate**: Only **0.47%** (12 false alarms out of 2,552 legitimate postings)
+  - **Overall Accuracy**: **98.51%**
+
+The production model is serialized as `models/safeapply_classifier.joblib` with full metadata in `models/model_card.json`.
+
+---
+
+## 🏛️ 4-Pillar Detection Architecture
+
+SafeApply unifies four complementary analytical layers:
+1. **Deterministic Rules Engine**: Instant verification of recruiter domains (public emails, typosquatting, chat handles) and compensation sanity bands.
+2. **EMSCAD Machine Learning Classifier**: Calibrated statistical model trained on 17.8k job postings providing empirical fraud probabilities and predictive token attribution.
+3. **Azure AI Search RAG**: Semantic vector/keyword retrieval of known scam patterns and authentic EMSCAD fraud precedents.
+4. **Azure AI Foundry GenAI**: Responsible AI grounded synthesis (Phi-4-mini-instruct) delivering plain-English explanations for students without hallucinating ungrounded claims.
 
 ---
 

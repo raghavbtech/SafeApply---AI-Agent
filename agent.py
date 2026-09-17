@@ -9,7 +9,12 @@ import re
 import json
 from dotenv import load_dotenv
 from extractor import extract_offer_details
-from tools import check_red_flags_rag, verify_company_domain, check_salary_sanity
+from tools import (
+    check_red_flags_rag,
+    verify_company_domain,
+    check_salary_sanity,
+    detect_fraud_ml,
+)
 
 load_dotenv()
 
@@ -151,6 +156,7 @@ def synthesize_with_genai(
     domain_check: dict,
     salary_check: dict,
     deterministic_assessment: dict,
+    ml_check: dict = None,
 ) -> tuple:
     """
     Use Azure AI Foundry / Azure OpenAI / GitHub Models to explain an
@@ -169,6 +175,7 @@ def synthesize_with_genai(
         client = OpenAI(
             base_url=base_url,
             api_key=AZURE_OPENAI_API_KEY,
+            timeout=15.0,
         )
 
         model_name = AZURE_OPENAI_DEPLOYMENT_NAME
@@ -179,6 +186,7 @@ def synthesize_with_genai(
             azure_endpoint=AZURE_OPENAI_ENDPOINT,
             api_key=AZURE_OPENAI_API_KEY,
             api_version=AZURE_OPENAI_API_VERSION,
+            timeout=15.0,
         )
 
         model_name = AZURE_OPENAI_DEPLOYMENT_NAME
@@ -188,6 +196,7 @@ def synthesize_with_genai(
         client = OpenAI(
             base_url="https://models.github.ai/inference",
             api_key=GITHUB_TOKEN.strip(),
+            timeout=15.0,
         )
 
         model_name = "gpt-4o-mini"
@@ -259,6 +268,9 @@ DOMAIN TOOL:
 SALARY TOOL:
 {json.dumps(salary_check, indent=2)}
 
+EMSCAD MACHINE LEARNING CLASSIFIER (17,880 POSTINGS BENCHMARK):
+{json.dumps(ml_check or {}, indent=2)}
+
 Return valid JSON with exactly these keys:
 
 {{
@@ -316,6 +328,7 @@ def synthesize_fallback(
     rag_results: list,
     domain_check: dict,
     salary_check: dict,
+    ml_check: dict = None,
 ) -> dict:
     """
     Deterministic evidence-based scoring engine.
@@ -436,6 +449,24 @@ def synthesize_fallback(
                 + "."
             )
 
+    # 5. EMSCAD Machine Learning Classifier assessment.
+    if ml_check and ml_check.get("is_flagged"):
+        prob_pct = ml_check.get("fraud_probability_pct", 0)
+        ml_risk = ml_check.get("risk_level", "Medium")
+        if ml_risk == "High":
+            risk_score += 25
+        elif ml_risk == "Medium":
+            risk_score += 15
+
+        tokens = ml_check.get("top_risk_tokens", [])
+        token_hint = f" (detected signals: {', '.join(tokens[:4])})" if tokens else ""
+        flags.append(
+            f"Machine Learning model flagged high recruitment scam probability ({prob_pct}%){token_hint}."
+        )
+    elif ml_check and ml_check.get("ml_fraud_probability", 1.0) < 0.10:
+        # Standard corporate language detected by model
+        risk_score = max(risk_score - 5, 5)
+
     unique_flags = list(dict.fromkeys(flags))
     risk_score = min(max(risk_score, 5), 98)
 
@@ -530,12 +561,16 @@ def analyze_job_offer(offer_text: str) -> dict:
         offer_text=offer_text,
     )
 
+    # Tool 4: EMSCAD Machine Learning Classifier
+    ml_check = detect_fraud_ml(offer_text, extracted_data)
+
     # Step 6: Deterministic assessment first, then optional GenAI explanation.
     deterministic_assessment = synthesize_fallback(
         extracted_data,
         rag_results,
         domain_check,
         salary_check,
+        ml_check,
     )
 
     if is_genai_active():
@@ -547,6 +582,7 @@ def analyze_job_offer(offer_text: str) -> dict:
                 domain_check,
                 salary_check,
                 deterministic_assessment,
+                ml_check,
             )
 
         except Exception as e:
@@ -572,6 +608,7 @@ def analyze_job_offer(offer_text: str) -> dict:
             "rag_matches": rag_results,
             "domain_verification": domain_check,
             "salary_sanity": salary_check,
+            "ml_classifier": ml_check,
         },
         "responsible_ai_disclaimer": RESPONSIBLE_AI_DISCLAIMER,
         "execution_mode": mode,

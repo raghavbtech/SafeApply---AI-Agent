@@ -495,6 +495,20 @@ def check_salary_sanity(salary_str: str, role_hint: str = "entry-level", offer_t
     }
 
 
+# ==========================================
+# TOOL 4: EMSCAD ML FRAUD DETECTOR
+# ==========================================
+def detect_fraud_ml(offer_text: str, extracted_data: dict = None) -> dict:
+    """
+    TOOL 4: EMSCAD Machine Learning Fraud Classifier.
+    Evaluates empirical scam risk probability using the statistical model
+    trained on 17,880 real job postings (addressing the 4.84% class imbalance).
+    """
+    from ml_classifier import predict_job_offer
+    extracted_data = extracted_data or {}
+    return predict_job_offer(offer_text, metadata=extracted_data)
+
+
 if __name__ == "__main__":
     print("Testing Tool 1 (RAG):")
     res1 = check_red_flags_rag("Please deposit Rs 1,499 registration fee before appointment")
@@ -507,3 +521,7 @@ if __name__ == "__main__":
     print("\nTesting Tool 3 (Salary):")
     res3 = check_salary_sanity("36 LPA", "entry-level", "direct campus selection no interview")
     print(" ", res3)
+
+    print("\nTesting Tool 4 (ML Classifier):")
+    res4 = detect_fraud_ml("Urgent data entry work from home earn cash daily via link")
+    print(" ", res4)
