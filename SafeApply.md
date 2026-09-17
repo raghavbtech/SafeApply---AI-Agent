@@ -1,342 +1,770 @@
-# SafeApply — AI Recruitment Scam Detector
-### Detailed Build Guide — Full Instructions & In-Depth Steps
+# SafeApply — Autonomous Recruitment Security & Job Application Agent
 
-**One-liner:** SafeApply is an AI agent that flags scam red flags in job offers — fake fees, mismatched domains, unrealistic salaries — and gives students a clear risk score with a plain explanation of why.
+## 1. Project Overview
 
-**AI-103 concepts demonstrated:** GenAI, RAG, Agent orchestration, Tool use, Responsible AI
+**SafeApply** is an AI-powered recruitment security and job-application assistant designed to help users identify suspicious recruitment emails, verify job opportunities, and safely proceed with legitimate applications.
 
-**Submission requirements (mandatory):**
-- Working Prototype / PoC — demonstrated end-to-end
-- GitHub repository with source code + README
-- 5-minute video, uploaded to YouTube (720p min, 1080p preferred)
-- One combined PDF containing: project title + team members, clickable prototype link (or PPT with screenshots), clickable GitHub link, clickable YouTube link
-- YouTube link also pasted separately into the LMS free-text submission field
+The system combines **AI agent orchestration, Retrieval-Augmented Generation (RAG), machine learning, deterministic security rules, Azure AI services, and mailbox integration**.
 
-**Priority order if time runs short:**
-1. Keep only the RAG-based red-flag checker tool (drop domain/salary tools) — still satisfies agent + tools + RAG
-2. Drop screenshot/PDF upload support — pasted text input only is fine
-3. Use a bare-bones Streamlit form instead of a polished frontend
-4. Never cut: README completeness, a working live demo, and the Responsible AI disclaimer — these are explicitly graded and cheap to deliver well
+SafeApply is not designed as a single fake-job classifier. Instead, the machine-learning classifier is one of several tools available to an AI agent. The agent evaluates evidence from multiple sources and selects the appropriate workflow for each recruitment email.
 
----
+The long-term goal is to provide an end-to-end recruitment assistant that can:
 
-## STEP 1 — Azure Resource Setup
-
-### 1.1 Confirm your credit
-- Log into [azure.microsoft.com/free/students](https://azure.microsoft.com/free/students) with your college email
-- Go to **Azure Portal → Cost Management + Billing** and confirm the $100 credit shows as active
-- Only one team member needs this — but make sure that person is available throughout the build (they'll own the subscription)
-
-### 1.2 Create a Resource Group
-- In the Azure Portal search bar, type **"Resource groups"** → click **Create**
-- Name it something clear, e.g. `safeapply-rg`
-- Pick a region physically close to you (e.g. Central India) — lower latency, sometimes better free-tier availability
-- Click **Review + Create**, then **Create**
-
-### 1.3 Create a Microsoft Foundry Project
-- Search **"Azure AI Foundry"** in the portal → **Create new project**
-- Attach it to `safeapply-rg`
-- Inside the project, go to **Model deployments** → deploy a GPT model
-  - Recommended: **GPT-4o-mini** — cheaper and faster, sufficient for reasoning/summarization tasks like this
-- Once deployed, go to the project's **Overview** or **Keys and Endpoint** section
-- Copy and securely save:
-  - **Endpoint URL**
-  - **API key**
-- **Do not** paste these directly into code files — put them in a `.env` file (see Step 1.6)
-
-### 1.4 Create an Azure AI Search Resource
-- Search **"Azure AI Search"** → **Create**
-- Choose the **Free tier** (F0) if available — sufficient for a small index of 15–30 documents
-- Name it, attach to `safeapply-rg`, same region as your Foundry project if possible
-- Once created, go to **Settings → Keys** and copy:
-  - **Search service endpoint**
-  - **Admin API key**
-
-### 1.5 Create an Azure AI Language Resource
-- Search **"Language service"** → **Create**
-- Choose **Free (F0)** tier
-- Attach to `safeapply-rg`
-- Copy the **Endpoint** and **Key 1** from the resource's **Keys and Endpoint** page
-
-### 1.6 Secure your credentials
-- Create a `.env` file in your project root:
-  ```
-  FOUNDRY_ENDPOINT=your_endpoint_here
-  FOUNDRY_API_KEY=your_key_here
-  SEARCH_ENDPOINT=your_endpoint_here
-  SEARCH_API_KEY=your_key_here
-  LANGUAGE_ENDPOINT=your_endpoint_here
-  LANGUAGE_API_KEY=your_key_here
-  ```
-- Add `.env` to `.gitignore` **before your first commit** — do this immediately, not later
-  ```
-  echo ".env" >> .gitignore
-  ```
-- Never hardcode keys directly into any `.py` file — always load via `os.environ` or a library like `python-dotenv`
+- Read recruitment-related emails with user permission.
+- Detect whether a message is related to a job opportunity.
+- Analyze the message for recruitment-scam indicators.
+- Generate an evidence-grounded risk score.
+- Recommend or perform mailbox actions for suspicious messages.
+- Extract structured information from legitimate job opportunities.
+- Compare legitimate opportunities against the user's profile or resume.
+- Prepare a job application.
+- Submit or continue an application only after the appropriate user approval.
 
 ---
 
-## STEP 2 — Build the Scam-Pattern Dataset
+## 2. Problem Statement
 
-### 2.1 Decide on categories
-Cover these recognizable categories (aim for 3–5 examples per category, ~15–20 total):
-- **Upfront fee requests** — registration fees, security deposits, "training material" charges
-- **Urgency/pressure tactics** — "respond within 2 hours," "limited slots remaining"
-- **Domain mismatches** — claims to represent a known company but uses a generic email (gmail/yahoo/outlook)
-- **Unrealistic salary-to-role ratio** — entry-level role promising unusually high pay with no clear justification
-- **Premature personal info requests** — asking for bank details, Aadhaar, or ID copies before any real interview process
-- **Vague role/process** — no clear job description, no interview, "instant hiring"
+Recruitment scams increasingly use email, messaging platforms, fake recruiter identities, unrealistic compensation claims, advance-fee requests, fake company domains, and requests for sensitive personal information.
 
-### 2.2 Write the examples
-- For each category, write 3–5 short realistic snippets (you can construct these yourselves — no need to scrape real scam emails)
-- Format each as a structured record:
-  ```json
-  {
-    "category": "upfront_fee",
-    "pattern": "Asks for registration or security deposit before confirming role",
-    "example_text": "Congratulations! To confirm your internship slot, please pay a refundable registration fee of ₹999 within 24 hours."
-  }
-  ```
-- Save all records into a single JSON or CSV file, e.g. `scam_patterns.json`
+Users often have to manually determine:
 
-### 2.3 Document your sourcing
-- In your README, note: "Scam pattern examples were constructed by the team based on commonly reported recruitment fraud patterns (referencing publicly documented scam types), not scraped from real correspondence."
-- This satisfies the "acknowledge resources" requirement without needing an external dataset license
+1. Whether a recruitment email is genuine.
+2. Whether the recruiter actually represents the claimed organization.
+3. Whether the salary and hiring process are plausible.
+4. Whether payment or personal-information requests are suspicious.
+5. Whether they should continue with the opportunity.
+6. Whether a legitimate opportunity matches their profile.
 
-### 2.4 Index into Azure AI Search
-- Use the Azure AI Search SDK (Python: `azure-search-documents`) to:
-  1. Create an index schema (fields: `id`, `category`, `pattern`, `example_text`)
-  2. Optionally generate embeddings for `example_text` if you want vector search (use a small embedding model via Foundry) — or start simpler with keyword/full-text search if time is tight
-  3. Upload your JSON records as documents into the index
-- Test with a simple query script: search for a known phrase and confirm it returns the matching record
+Most existing solutions address only one part of the problem, such as spam filtering or fake-job classification.
+
+SafeApply addresses the complete workflow by combining **mail ingestion, security analysis, AI reasoning, RAG-based evidence retrieval, ML classification, deterministic verification tools, and an assisted application workflow**.
 
 ---
 
-## STEP 3 — Build the Extraction Pipeline
+## 3. Core Idea
 
-### 3.1 Set up Azure AI Language client
-- Install SDK: `pip install azure-ai-textanalytics`
-- Initialize client using your `LANGUAGE_ENDPOINT` and `LANGUAGE_API_KEY` from `.env`
+SafeApply follows an agentic architecture in which the AI agent decides which tools and workflows are required for an incoming recruitment email.
 
-### 3.2 Define what to extract
-From a pasted job offer, extract:
-- **Company name** (named entity recognition)
-- **Salary figure** (look for currency/number entities, or use key phrase extraction + regex as a fallback)
-- **Contact email/domain** (regex extraction — Azure Language won't reliably catch this, so combine with simple Python regex)
-- **Requested actions** (key phrase extraction — look for phrases like "pay," "transfer," "send copy of")
-
-### 3.3 Write the extraction function
-- Input: raw pasted text
-- Output: a structured dictionary, e.g.:
-  ```python
-  {
-    "company_name": "TechCorp Solutions",
-    "salary": "₹8,00,000/year",
-    "contact_domain": "gmail.com",
-    "requested_actions": ["pay registration fee", "send bank details"]
-  }
-  ```
-
-### 3.4 Test it
-- Run 5–10 sample offers (mix of realistic legitimate and fake ones) through this function
-- Manually check: did it correctly identify company name, salary, domain, and any suspicious requested actions?
-- Fix obvious extraction failures before moving to Step 4 — this is your foundation, errors here cascade
-
----
-
-## STEP 4 — Build RAG Retrieval
-
-### 4.1 Write the retrieval function
-- Input: the extracted offer text (or a summary of it)
-- Query your Azure AI Search index for the most similar known scam patterns
-- Output: top 2–3 matching patterns with their category and pattern description
-
-### 4.2 Test retrieval quality
-- Try a query containing "please pay ₹999 registration fee" — confirm it retrieves your `upfront_fee` pattern record
-- Try an unrelated/neutral query (e.g., a normal job offer with no red flags) — confirm it either returns nothing strongly relevant or low-confidence matches
-- Adjust your search query construction (e.g., which fields to search, whether to use exact phrase vs. broader match) if results are poor
-
----
-
-## STEP 5 — Build Tools and Agent Orchestration
-
-### 5.1 Tool 1 — Red-Flag Pattern Checker (build this first, highest priority)
-- Wraps your Step 4 retrieval function
-- Input: extracted offer data
-- Output: list of matched scam patterns with categories
-
-### 5.2 Tool 2 — Domain/Company Verification
-- Simple logic: compare the claimed company name against the sender's email domain
-- Example check: does "techcorp.com" appear in or relate to "TechCorp Solutions"? If the domain is generic (gmail, yahoo, outlook) and the offer claims to be from an established company, flag it
-- This can be pure Python string logic — no need for a live company database lookup unless you have time to spare
-
-### 5.3 Tool 3 — Salary Sanity Checker
-- Define rough salary bands by role type (e.g., "internship": ₹0–25,000/month, "entry-level full-time": ₹3–8 LPA) — hardcode a small lookup table
-- Compare the extracted salary against the relevant band
-- Flag significant mismatches (e.g., an "entry-level" role offering ₹50 LPA)
-
-### 5.4 Wire tools into a Foundry agent
-- Define each tool as a callable function with a clear name and description (this is what lets the agent decide when to call it)
-- Set up the agent in Microsoft Foundry so that, given the extracted offer data, it calls all three tools (or as many as you've built) and collects their outputs
-- Test the agent's tool-calling behavior — confirm it actually invokes each tool and receives structured responses back
-
----
-
-## STEP 6 — Build the GenAI Synthesis Layer
-
-### 6.1 Design the final prompt
-Your prompt to the GenAI model should include:
-- The extracted offer data
-- The outputs from all tools (matched scam patterns, domain check result, salary check result)
-- Clear instructions:
-  - Synthesize findings into a risk verdict: **Low / Medium / High**
-  - Explain the verdict in plain English, referencing specific red flags found
-  - Explicitly state this is **advisory only**, not a definitive judgment
-  - Avoid absolute accusations against named companies — phrase cautiously (e.g., "this pattern is commonly associated with..." rather than "this company is a scam")
-
-### 6.2 Example prompt structure
-```
-You are a recruitment fraud risk assessor. Given the following extracted job offer
-details and analysis results, provide a risk verdict (Low/Medium/High) and a clear,
-plain-English explanation citing specific red flags. Be advisory, not definitive.
-Do not make absolute accusations against any named company.
-
-Extracted data: {extracted_data}
-Matched scam patterns: {rag_results}
-Domain check result: {domain_check}
-Salary check result: {salary_check}
-
-Respond in this format:
-Risk Level: [Low/Medium/High]
-Explanation: [plain-English reasoning]
+```text
+                    ┌─────────────────────┐
+                    │ User Email Inbox    │
+                    │ Outlook / Gmail     │
+                    └──────────┬──────────┘
+                               │
+                        Mail Connector
+                               │
+                    ┌──────────▼──────────┐
+                    │ SafeApply Mail Agent│
+                    └──────────┬──────────┘
+                               │
+                      Recruitment Email?
+                               │
+                 ┌─────────────┴─────────────┐
+                 │                           │
+                NO                          YES
+                 │                           │
+              Ignore                  Analyze Offer
+                                             │
+       ┌─────────────────────────────────────┼────────────────────────────────────┐
+       │                    │                │                 │                   │
+       ▼                    ▼                ▼                 ▼                   ▼
+ Rules Engine         EMSCAD ML        Azure AI Search    Domain Tool        Salary Tool
+       │                    │                │                 │                   │
+       └─────────────────────────────────────┼────────────────────────────────────┘
+                                             │
+                                   Evidence Fusion Engine
+                                             │
+                                        Risk Score
+                                             │
+                     ┌───────────────────────┼────────────────────────┐
+                     │                       │                        │
+                    LOW                    MEDIUM                  HIGH/CRITICAL
+                     │                       │                        │
+                     ▼                       ▼                        ▼
+              Job Agent Flow         Verification Flow        Security Flow
+                     │                       │                        │
+              Extract Job Data      Request/perform extra     Recommend quarantine
+                     │               verification             or move to spam
+              Resume Matching
+                     │
+             Prepare Application
+                     │
+                User Approval
+                     │
+                  Apply
 ```
 
-### 6.3 Test the full pipeline end-to-end
-- Paste a full job offer → extraction → RAG retrieval → tools → GenAI synthesis → verdict
-- Confirm the output is coherent, correctly reflects the red flags found, and reads naturally
+---
+
+## 4. SafeApply AI Agents
+
+### 4.1 Mail Agent
+
+The Mail Agent acts as the entry point of the workflow.
+
+Responsibilities:
+
+- Connect to the user's mailbox with explicit authorization.
+- Read selected or newly received recruitment emails.
+- Extract sender, subject, body, URLs, and message metadata.
+- Determine whether the message appears recruitment-related.
+- Pass relevant messages to the Recruitment Security Agent.
+
+For Microsoft Outlook / Microsoft 365, mailbox integration can be implemented using **Microsoft Graph** with delegated, read-only permissions.
 
 ---
 
-## STEP 7 — Build the Frontend
+### 4.2 Recruitment Security Agent
 
-### 7.1 Choose Streamlit (fastest option)
-- Install: `pip install streamlit`
-- Build a single-page app:
-  ```python
-  import streamlit as st
+The Recruitment Security Agent determines whether a recruitment message is trustworthy enough to continue.
 
-  st.title("SafeApply — Job Offer Risk Checker")
-  offer_text = st.text_area("Paste the job offer text here:")
-  if st.button("Check Risk"):
-      # call your pipeline function here
-      result = run_pipeline(offer_text)
-      st.write(f"**Risk Level:** {result['risk_level']}")
-      st.write(f"**Explanation:** {result['explanation']}")
-  ```
+It orchestrates multiple tools rather than relying on a single model.
 
-### 7.2 Add visual polish (only if time allows)
-- Color-code the risk badge (green/yellow/red)
-- Show which specific red flags were matched, as a bullet list
-- Add the Responsible AI disclaimer text visibly on the page
+Inputs include:
 
-### 7.3 Run and test locally
-- `streamlit run app.py`
-- Confirm it correctly displays results for a few test inputs before moving on
+- Original email body.
+- Extracted recruiter and company information.
+- Email domain.
+- Compensation information.
+- Requested actions.
+- URLs and company website.
+- ML fraud probability.
+- RAG evidence.
+- Rule-engine output.
 
----
+The security agent produces:
 
-## STEP 8 — Testing
-
-### 8.1 Test each component individually first
-- **Extraction:** 3–4 sample offers, verify fields are pulled correctly
-- **RAG:** known scam phrase query, verify correct pattern match returned
-- **Tools:** test each tool individually with an obvious trigger case
-
-### 8.2 Build a small test suite (9–12 cases total)
-Prepare 3 examples of each:
-
-| Category | Example characteristics | Expected verdict |
-|---|---|---|
-| Clearly fake | Fee request + urgency + generic domain + vague role | High risk |
-| Clearly legitimate | Real company domain, no fees, standard language | Low risk |
-| Ambiguous | Informal email but no fee request, unclear signals | Medium risk |
-
-- Run each through the full pipeline
-- Record input/output pairs — this becomes your README's "Testing and Results" section
-
-### 8.3 Specifically test for false positives
-- Run a genuinely legitimate-sounding offer and confirm the system does **not** wrongly flag it High risk
-- This is the single most important test for your Responsible AI section — document this test explicitly
-
-### 8.4 Check graceful failure
-- Test with empty input, gibberish text, or a very short offer
-- Confirm the app doesn't crash — shows a sensible message instead
-
-### 8.5 Time the pipeline
-- Note how long a full query takes end-to-end
-- If it's slow (15–20+ seconds), mention this as a known limitation in your README rather than risk it surprising you live
+```text
+Risk Level: Low / Medium / High / Critical
+Risk Score: 0–100
+Evidence: Directly observed indicators
+Recommendation: Proceed / Verify / Quarantine
+```
 
 ---
 
-## STEP 9 — Documentation (README.md)
+### 4.3 Verification Agent
 
-Include these sections:
-- **Project title and team members**
-- **Problem statement** — recruitment scams targeting students, especially during placement season
-- **Solution overview** — one paragraph explaining the agent's flow
-- **Architecture / data flow diagram** — extraction → RAG → tools → GenAI verdict (use a simple text diagram or draw one)
-- **Technology stack** — Microsoft Foundry, Azure AI Search, Azure AI Language, Streamlit, Python
-- **Setup instructions** — how to install dependencies, set up `.env`, run locally
-- **Testing and results** — your 9–12 test cases with input/output summaries
-- **Known limitations** — e.g., can't verify real-time company legitimacy, advisory only, pipeline latency
-- **Future improvements** — browser extension, WhatsApp bot integration, larger scam-pattern database
-- **Acknowledgments** — note that scam patterns were team-curated based on commonly reported fraud types; list any libraries used (Streamlit, Azure SDKs, etc.)
+Medium-risk opportunities are routed to a verification workflow.
 
----
+The Verification Agent can:
 
-## STEP 10 — Video Recording
+- Compare recruiter email and company domain.
+- Compare email domain with a website contained in the message.
+- Check whether the organization identity is internally consistent.
+- Identify public email accounts used for claimed corporate recruiting.
+- Detect suspicious hiring-process characteristics.
+- Present unresolved uncertainty to the user.
 
-Structure (max 5 minutes):
-
-| Section | Time | What to say/show |
-|---|---|---|
-| Introduction | 30 sec | Team names, project title, one-line use case |
-| Problem statement | 30 sec | Why recruitment scams matter right now, to your own class |
-| AI-driven solution | 1 min | Explain GenAI + RAG + agent + tools approach briefly |
-| Technical demonstration | 2 min | Live: paste a fake offer → show High risk verdict; paste a real offer → show Low risk verdict |
-| Impact & future scope | 1 min | Real value to classmates now; future ideas (browser extension, WhatsApp integration) |
-
-- Record at 1080p if possible (720p is the minimum)
-- Upload to YouTube, set sharing to "Unlisted" or "Public" (not Private) so it's accessible
-- Double-check the link works in an incognito browser window before submitting
+The agent should avoid making unsupported claims that a company or recruiter is fraudulent.
 
 ---
 
-## STEP 11 — Submission Packaging
+### 4.4 Job Application Agent
 
-### 11.1 Assemble the PDF
-Create one PDF containing:
-- Project title and team member names
-- Clickable link to the prototype (if hosted — e.g. Streamlit Community Cloud deployment) OR a short PPT with screenshots exported into the same PDF if not hosted
-- Clickable link to the GitHub repository
-- Clickable link to the YouTube video
+Low-risk job opportunities can be passed to the Job Application Agent.
 
-### 11.2 Verify before submitting
-- Open the exported PDF and click every link — PDF exports sometimes break hyperlinks, so always verify after export, not before
-- Paste the YouTube link separately into the LMS free-text submission field
-- Submit with time to spare — don't wait until the final minutes in case of upload issues
+The Job Agent can extract:
+
+- Company name.
+- Job title.
+- Location.
+- Salary or stipend.
+- Required skills.
+- Experience requirements.
+- Application deadline.
+- Application URL.
+- Recruiter contact.
+
+Future versions can compare these requirements with the user's resume or profile.
+
+Example:
+
+```text
+Company: Example Technologies
+Role: Backend Developer
+Location: Bengaluru
+Salary: ₹8–10 LPA
+
+Required Skills:
+✓ Python
+✓ REST APIs
+✓ SQL
+△ Azure
+△ Docker
+
+Profile Match: 81%
+```
+
+The Job Agent can then prepare the user's application and request final approval before any external submission.
 
 ---
 
-## Final Checklist
+## 5. Detection Architecture
 
-- [ ] Working prototype demonstrates the problem, AI approach, AI-103 concepts, and a live technical workflow
-- [ ] GitHub repo accessible, README complete, code clean and commented
-- [ ] `.env` and all credentials excluded from Git
-- [ ] 5-minute video finished, on YouTube, link tested in incognito mode
-- [ ] Submission PDF created with all links tested after export
-- [ ] YouTube link also pasted into the LMS free-text field
-- [ ] Team member info correct in LMS registration
-- [ ] Third-party resources and dataset sourcing acknowledged in README
-- [ ] Tested for false positives on a legitimate job offer example
-- [ ] Responsible AI disclaimer visible in the UI
+SafeApply uses a hybrid detection system.
+
+### 5.1 Deterministic Rule Engine
+
+The rule engine identifies directly observable recruitment-risk indicators.
+
+Examples:
+
+- Advance or registration fee.
+- Security deposit.
+- Payment through UPI.
+- Payment screenshot request.
+- Very short acceptance deadline.
+- No-interview direct selection.
+- Aadhaar/PAN/passport request.
+- Bank-account information request.
+- OTP, PIN, or password request.
+- Fake-check/equipment purchase workflow.
+- Telegram/WhatsApp-only recruitment.
+- Public Gmail/Yahoo account claiming to represent a major company.
+
+The rule engine provides explainable evidence and should remain independent of the GenAI model.
+
+---
+
+### 5.2 EMSCAD Machine-Learning Classifier
+
+SafeApply uses a supervised machine-learning model trained using the **Employment Scam Aegean Dataset (EMSCAD)**.
+
+The classifier provides an additional statistical signal:
+
+```text
+Fraud Probability: 61.5%
+ML Risk Band: Medium
+```
+
+The classifier does **not** independently determine the final SafeApply risk score.
+
+It acts as one tool within the broader agent pipeline.
+
+This is important because EMSCAD primarily contains full job advertisements, while SafeApply may receive:
+
+- Short emails.
+- WhatsApp-style messages.
+- Placement notices.
+- Job descriptions.
+- Recruiter outreach.
+
+Therefore, ML probabilities are treated as advisory evidence rather than absolute fraud probabilities.
+
+---
+
+## 6. Retrieval-Augmented Generation (RAG)
+
+SafeApply uses Azure AI Search as a recruitment-fraud knowledge base.
+
+### 6.1 Curated Scam Pattern Index
+
+Current knowledge base:
+
+```text
+safeapply-scam-patterns
+```
+
+It contains interpretable recruitment-fraud patterns such as:
+
+- Advance-fee scams.
+- Urgency pressure.
+- Premature sensitive-information requests.
+- Fake-check/equipment scams.
+- Domain impersonation.
+- Unrealistic salary claims.
+- Suspicious hiring-process patterns.
+
+RAG retrieval is **evidence-gated**.
+
+A pattern can only be retrieved as evidence for the current offer if the offer itself contains corresponding observed evidence.
+
+This reduces hallucination and confirmation bias.
+
+---
+
+### 6.2 Historical Job Example Index
+
+A future second index can contain legitimate and fraudulent EMSCAD examples:
+
+```text
+safeapply-job-examples
+```
+
+This allows retrieval of both:
+
+- Similar fraudulent examples.
+- Similar legitimate examples.
+
+The goal is to avoid a RAG system that always returns a scam pattern merely because its knowledge base contains only scams.
+
+---
+
+## 7. GenAI Layer
+
+Azure AI Foundry is used primarily for **grounded explanation generation**.
+
+The GenAI model does not independently determine the risk score.
+
+It receives:
+
+- Original job offer.
+- Extracted entities.
+- Rule-engine findings.
+- Domain-check output.
+- Salary-check output.
+- ML classifier output.
+- Retrieved RAG evidence.
+- Fixed deterministic assessment.
+
+It then generates a concise human-readable explanation.
+
+Example:
+
+```text
+High Risk — 87/100
+
+The message asks the candidate to pay a refundable registration fee
+within two hours and requests identity documents before a formal
+interview process. The recruiter also uses a public Gmail address
+while claiming to represent a corporate employer. These directly
+observed indicators are consistent with known recruitment-scam
+patterns.
+```
+
+Strict grounding rules prevent the model from introducing claims that are not supported by the original offer.
+
+For example:
+
+```text
+"Pay using UPI"
+```
+
+must not become:
+
+```text
+"Provide your UPI PIN"
+```
+
+unless the original message explicitly requests the PIN.
+
+---
+
+## 8. Compensation Normalization
+
+SafeApply normalizes abbreviated compensation formats before performing salary analysis.
+
+Examples:
+
+```text
+$5k            → $5,000
+$120k/year     → $120,000/year
+0.1M/year      → $100,000/year
+₹25k/month     → ₹25,000/month
+8LPA           → ₹800,000/year
+₹1.5L/month    → ₹150,000/month
+₹1Cr/year      → ₹10,000,000/year
+```
+
+It can also reason about short-duration compensation.
+
+Example:
+
+```text
+$5k for 2 hours
+```
+
+is normalized as:
+
+```text
+Total compensation = $5,000
+Equivalent rate = $2,500/hour
+```
+
+which can then be treated as an unusually high compensation claim requiring verification.
+
+---
+
+## 9. Risk Fusion
+
+SafeApply combines evidence from multiple tools.
+
+```text
+Rules
+  +
+Domain Verification
+  +
+Salary Analysis
+  +
+EMSCAD ML
+  +
+RAG Evidence
+        │
+        ▼
+Evidence Fusion
+        │
+        ▼
+Final Risk Score
+```
+
+Suggested interpretation:
+
+| Score | Risk Level | Agent Action |
+|---:|---|---|
+| 0–29 | Low | Allow legitimate-job workflow |
+| 30–64 | Medium | Trigger additional verification |
+| 65–84 | High | Warn user and prevent automatic application |
+| 85–100 | Critical | Recommend quarantine/spam |
+
+The final thresholds may be calibrated using validation data and real SafeApply benchmark cases.
+
+---
+
+## 10. Mailbox Automation
+
+### Phase 1 — User-Selected Mail Analysis
+
+The user explicitly selects an email and clicks:
+
+```text
+Analyze with SafeApply
+```
+
+The email is passed through the full SafeApply security pipeline.
+
+---
+
+### Phase 2 — Inbox Recruitment Scanner
+
+SafeApply periodically or manually scans recent emails and identifies likely recruitment messages.
+
+Example dashboard:
+
+| Email | Company | Risk | Action |
+|---|---|---:|---|
+| Software Engineer Offer | Microsoft | 8/100 | Review / Apply |
+| Remote Assistant Opportunity | Unknown | 61/100 | Verify |
+| Urgent Selection Letter | Infosys impersonation | 94/100 | Quarantine |
+
+---
+
+### Phase 3 — Controlled Mail Actions
+
+High-risk emails may be recommended for spam/quarantine.
+
+SafeApply should initially require user confirmation:
+
+```text
+SafeApply considers this message Critical Risk (94/100).
+
+[Move to Spam]
+[Keep Email]
+[Review Evidence]
+```
+
+Users may later enable optional automation:
+
+```text
+Automatically quarantine recruitment messages with risk ≥ 90
+```
+
+---
+
+## 11. Assisted Job Application Workflow
+
+For low-risk opportunities:
+
+```text
+SafeApply detects legitimate opportunity
+        ↓
+Extract job details
+        ↓
+Analyze job requirements
+        ↓
+Compare with user profile/resume
+        ↓
+Generate application package
+        ↓
+User reviews
+        ↓
+Agent continues application
+```
+
+Possible application artifacts include:
+
+- Tailored resume selection.
+- Cover letter.
+- Recruiter response.
+- Skills summary.
+- Application-form answers.
+- Application tracking record.
+
+External submission should initially remain user-approved.
+
+---
+
+## 12. Responsible AI and Human Control
+
+SafeApply is intended to assist rather than make irreversible decisions without user awareness.
+
+Core safeguards:
+
+### Evidence Grounding
+
+Every high-risk statement should trace back to observed evidence, tool output, or retrieved supporting information.
+
+### No Automatic Accusations
+
+SafeApply should say:
+
+```text
+"This message contains recruitment-scam indicators."
+```
+
+rather than:
+
+```text
+"This company is fraudulent."
+```
+
+unless independently established evidence supports such a statement.
+
+### Human Approval for High-Impact Actions
+
+Initial implementation should require confirmation before:
+
+- Moving an email to spam.
+- Deleting an email.
+- Sharing personal information.
+- Sending an application.
+- Submitting a form.
+- Contacting a recruiter.
+
+### Minimal Mail Permissions
+
+Mailbox connectors should request only the permissions needed for the selected workflow.
+
+Read-only access is preferred for initial implementation.
+
+Write permissions should only be requested when features such as moving messages or sending applications are enabled.
+
+---
+
+## 13. Proposed Technology Stack
+
+| Layer | Technology |
+|---|---|
+| Frontend | Streamlit |
+| Core Backend | Python |
+| GenAI | Azure AI Foundry |
+| Current Foundry Model | Phi-4-mini-instruct |
+| RAG | Azure AI Search |
+| NLP / Entity Extraction | Azure AI Language + Regex |
+| ML | Scikit-learn / EMSCAD |
+| Mail Integration | Microsoft Graph |
+| Identity / OAuth | Microsoft Entra ID |
+| Data Processing | Pandas / NumPy |
+| Model Persistence | Joblib |
+| Testing | Pytest |
+| Version Control | Git / GitHub |
+
+Future Gmail support may be implemented using Google's Gmail API or an appropriate connector after the Outlook/Microsoft 365 workflow is stable.
+
+---
+
+## 14. Current SafeApply Pipeline
+
+The current implementation already includes:
+
+- Recruitment-offer text analysis.
+- Entity extraction.
+- Requested-action normalization.
+- Company/domain extraction.
+- Salary extraction.
+- Compact salary notation handling.
+- Azure AI Search RAG.
+- Evidence-gated fraud pattern retrieval.
+- Domain verification.
+- Salary sanity analysis.
+- EMSCAD ML classification.
+- Deterministic risk fusion.
+- Azure AI Foundry explanation.
+- Hallucination-grounding safeguards.
+- Streamlit frontend.
+- Responsible AI disclaimer.
+- Automated pytest checks.
+- Benchmark and grounding tests.
+
+The next major development stage is **mailbox integration and agent-controlled actions**.
+
+---
+
+## 15. Planned Development Roadmap
+
+### Phase 1 — Recruitment Risk Engine
+
+Status: **Implemented / actively improving**
+
+Components:
+
+- Rules.
+- RAG.
+- ML.
+- Domain analysis.
+- Salary analysis.
+- GenAI explanation.
+- Grounding tests.
+
+---
+
+### Phase 2 — Mail Integration
+
+Planned components:
+
+- Microsoft Entra authentication.
+- Microsoft Graph connection.
+- Read selected Outlook emails.
+- Recruitment-email detection.
+- Analyze selected mail directly in SafeApply.
+
+---
+
+### Phase 3 — Mail Security Agent
+
+Planned components:
+
+- Automatic recruitment-email discovery.
+- Risk-based inbox dashboard.
+- Recommended spam/quarantine actions.
+- User-approved mailbox actions.
+- Optional high-confidence automation.
+
+---
+
+### Phase 4 — Job Opportunity Agent
+
+Planned components:
+
+- Job requirement extraction.
+- Resume/profile ingestion.
+- Skill matching.
+- Opportunity ranking.
+- Application readiness assessment.
+
+---
+
+### Phase 5 — Application Agent
+
+Planned components:
+
+- Cover-letter generation.
+- Recruiter email drafting.
+- Application-form preparation.
+- User approval.
+- Supported application submission.
+- Application status tracking.
+
+---
+
+## 16. Example End-to-End Workflow
+
+### Legitimate Opportunity
+
+```text
+Incoming Mail
+      ↓
+Recruitment-related
+      ↓
+Domain verified
+ML probability low
+No scam RAG evidence
+Salary plausible
+No suspicious action requests
+      ↓
+Risk = 10/100
+      ↓
+Job Agent
+      ↓
+Extract role and requirements
+      ↓
+Profile match = 84%
+      ↓
+Prepare application
+      ↓
+User approves
+      ↓
+Submit / continue application
+```
+
+### Suspicious Opportunity
+
+```text
+Incoming Mail
+      ↓
+Recruitment-related
+      ↓
+No interview
+$5k for 2 hours
+Registration fee
+Public Gmail
+Aadhaar requested
+      ↓
+Rules + ML + RAG + Domain + Salary
+      ↓
+Risk = 96/100
+      ↓
+Security Agent
+      ↓
+Explain evidence
+      ↓
+Recommend quarantine
+      ↓
+User approves
+      ↓
+Move to Spam
+```
+
+---
+
+## 17. Project Positioning
+
+SafeApply should be positioned as:
+
+> **An autonomous, evidence-grounded recruitment security and job-application agent that uses machine learning, RAG, deterministic verification tools, GenAI, and mailbox integrations to protect users from recruitment scams while helping them act on legitimate opportunities.**
+
+The key technical distinction is:
+
+```text
+Machine Learning ≠ SafeApply
+
+Machine Learning = one SafeApply tool
+
+RAG = one SafeApply knowledge source
+
+Rules = one SafeApply evidence source
+
+Azure services = specialized SafeApply tools
+
+AI Agent = orchestrator that selects tools and actions
+```
+
+This architecture allows SafeApply to demonstrate genuine **agentic AI behavior** rather than functioning only as a binary fake-job classifier.
+
+---
+
+## 18. Current Objective
+
+The immediate next milestone is to implement the **SafeApply Mail Analyzer** using Microsoft Outlook / Microsoft 365 integration.
+
+The first version should:
+
+1. Authenticate the user.
+2. Read user-selected recruitment emails.
+3. Convert email content into the existing SafeApply input format.
+4. Run the complete SafeApply analysis pipeline.
+5. Display the final risk score and supporting evidence.
+6. Allow the user to choose whether to keep, review, or move suspicious messages.
+7. Route low-risk opportunities to the future Job Application Agent.
+
+This milestone will transform SafeApply from a standalone recruitment-text analyzer into an integrated AI recruitment-security agent.

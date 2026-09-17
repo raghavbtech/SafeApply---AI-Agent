@@ -29,3 +29,8 @@ Thumbs.db
 
 # Large Datasets
 DataSet.csv
+
+# Local runtime state
+quarantine_vault.json
+applied_jobs.json
+candidate_profile.json
