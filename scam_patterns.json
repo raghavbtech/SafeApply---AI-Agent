@@ -17,7 +17,7 @@
     "id": "scam_fee_03",
     "category": "upfront_fee",
     "pattern": "Laptop security deposit or courier insurance fee charged before work-from-home dispatch",
-    "example_text": "Company will courier an Apple MacBook Pro and home office kit. Please deposit a refundable security & transit insurance clearance charge of Rs 5,000 to our logistics partner account before dispatch.",
+    "example_text": "Company will courier an Apple MacBook Pro and home office kit. Please deposit a refundable security and transit insurance clearance charge of Rs 5,000 to our logistics partner account before dispatch.",
     "risk_weight": "high"
   },
   {
@@ -65,7 +65,7 @@
   {
     "id": "scam_salary_01",
     "category": "salary_ratio",
-    "pattern": "Exorbitant salary for simple part-time or entry-level data entry / copy-paste role",
+    "pattern": "Exorbitant salary for simple part-time or entry-level data entry or copy-paste role",
     "example_text": "Urgent hiring! Work from home 2 hours daily doing simple form filling and data entry. Guaranteed salary of INR 75,000 per month plus daily bonus. No experience required.",
     "risk_weight": "high"
   },
@@ -79,22 +79,22 @@
   {
     "id": "scam_salary_03",
     "category": "salary_ratio",
-    "pattern": "Huge daily crypto or commission payouts promised for basic social media liking/review tasks",
-    "example_text": "Earn Rs 5,000 to Rs 15,000 per day simply subscribing to YouTube channels and reviewing Google maps locations. Instant payout to your UPI wallet.",
+    "pattern": "Huge daily crypto or commission payouts promised for basic social media liking or review tasks",
+    "example_text": "Earn Rs 5,000 to Rs 15,000 per day simply subscribing to YouTube channels and reviewing Google Maps locations. Instant payout to your UPI wallet.",
     "risk_weight": "high"
   },
   {
     "id": "scam_info_01",
     "category": "premature_personal_info",
-    "pattern": "Demands bank account details, UPI PIN, or internet banking login before any formal interview",
-    "example_text": "For salary credit account setup, send your bank account number, IFSC code, registered mobile number, and net banking password/OTP verification.",
+    "pattern": "Requests bank account or salary-credit details before a formal hiring process is completed",
+    "example_text": "Before scheduling the interview, please provide your bank account number and IFSC code for salary account registration.",
     "risk_weight": "high"
   },
   {
     "id": "scam_info_02",
     "category": "premature_personal_info",
-    "pattern": "Requests unredacted government IDs (Aadhaar, PAN, Passport) and debit card photos upfront",
-    "example_text": "Submit clear photographs of your Aadhaar card front and back, PAN card, and front photo of debit card to confirm identity before scheduling Round 1.",
+    "pattern": "Requests unredacted government identity documents before a formal interview or verified onboarding stage",
+    "example_text": "Submit clear photographs of your Aadhaar card front and back, PAN card, or passport copy before scheduling Round 1.",
     "risk_weight": "high"
   },
   {
@@ -102,6 +102,13 @@
     "category": "premature_personal_info",
     "pattern": "Demands original educational mark sheets or certificates to be mailed to unknown address",
     "example_text": "Candidates must courier their original 10th, 12th, and Degree mark sheets to our verification office for physical retention during the 6-month probation period.",
+    "risk_weight": "high"
+  },
+  {
+    "id": "scam_info_04",
+    "category": "premature_personal_info",
+    "pattern": "Requests authentication secrets such as OTP, UPI PIN, or internet banking password",
+    "example_text": "To complete account verification, send the OTP, UPI PIN, or internet banking password received or used during the verification process.",
     "risk_weight": "high"
   },
   {
@@ -123,6 +130,13 @@
     "category": "vague_role_process",
     "pattern": "Informal interview conducted entirely via text messages on WhatsApp or Telegram with immediate offer",
     "example_text": "Based on our 5-minute chat on WhatsApp, our board of directors is pleased to offer you the position of Assistant Manager. Please sign and return today.",
+    "risk_weight": "high"
+  },
+  {
+    "id": "scam_check_01",
+    "category": "fake_check_equipment",
+    "pattern": "Recruiter promises to send a check and instructs the candidate to purchase equipment or software",
+    "example_text": "We will send you a check to purchase your workstation and required office software. Deposit the check and buy the equipment from our approved supplier.",
     "risk_weight": "high"
   }
 ]

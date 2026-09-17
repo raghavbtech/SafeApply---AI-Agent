@@ -63,206 +63,433 @@ def is_genai_active() -> bool:
     return is_azure_foundry_configured() or is_github_models_configured()
 
 
-def synthesize_with_genai(extracted_data: dict, rag_results: list, domain_check: dict, salary_check: dict) -> tuple:
-    """Synthesize results using Azure AI Foundry (Phi-4-mini-instruct / GPT) or Azure OpenAI."""
+def _sanitize_grounded_output(parsed: dict, offer_text: str, deterministic_assessment: dict) -> dict:
+    """
+    Enforce evidence grounding after GenAI synthesis.
+
+    The model may use RAG patterns for context, but unsupported sensitive-data
+    claims must not be introduced into the final explanation or red-flag list.
+    Risk level and score always come from the deterministic assessment.
+    """
+    text = offer_text.lower()
+
+    sensitive_claims = {
+        "upi pin": ["upi pin"],
+        "otp": [" otp", "otp ", "one-time password", "one time password"],
+        "internet banking password": [
+            "internet banking password",
+            "net banking password",
+        ],
+        "debit card": ["debit card"],
+        "credit card": ["credit card"],
+        "password": ["password"],
+        "bank account details": [
+            "bank account",
+            "bank details",
+            "account number",
+            "ifsc",
+        ],
+        "aadhaar": ["aadhaar", "aadhar"],
+        "pan card": ["pan card"],
+        "passport": ["passport"],
+    }
+
+    unsupported = {
+        claim
+        for claim, aliases in sensitive_claims.items()
+        if not any(alias in text for alias in aliases)
+    }
+
+    flags = parsed.get("identified_red_flags", [])
+    cleaned_flags = []
+
+    for flag in flags:
+        flag_text = str(flag)
+        lower_flag = flag_text.lower()
+
+        if any(claim in lower_flag for claim in unsupported):
+            continue
+
+        cleaned_flags.append(flag_text)
+
+    explanation = str(parsed.get("explanation", "")).strip()
+
+    # Remove complete sentences that introduce unsupported sensitive claims.
+    if explanation:
+        sentences = re.split(r"(?<=[.!?])\s+", explanation)
+        kept_sentences = []
+
+        for sentence in sentences:
+            lower_sentence = sentence.lower()
+
+            if any(claim in lower_sentence for claim in unsupported):
+                continue
+
+            kept_sentences.append(sentence)
+
+        explanation = " ".join(kept_sentences).strip()
+
+    # If sanitization removes too much, use the deterministic explanation.
+    if not explanation:
+        explanation = deterministic_assessment["explanation"]
+
+    if not cleaned_flags:
+        cleaned_flags = deterministic_assessment["identified_red_flags"]
+
+    parsed["risk_level"] = deterministic_assessment["risk_level"]
+    parsed["risk_score"] = deterministic_assessment["risk_score"]
+    parsed["explanation"] = explanation
+    parsed["identified_red_flags"] = list(dict.fromkeys(cleaned_flags))
+
+    return parsed
+
+
+def synthesize_with_genai(
+    offer_text: str,
+    extracted_data: dict,
+    rag_results: list,
+    domain_check: dict,
+    salary_check: dict,
+    deterministic_assessment: dict,
+) -> tuple:
+    """
+    Use Azure AI Foundry / Azure OpenAI / GitHub Models to explain an
+    evidence-based assessment.
+
+    The deterministic engine owns the risk score and verdict. GenAI only
+    produces a grounded plain-English explanation and evidence summary.
+    """
     from openai import OpenAI, AzureOpenAI
 
     endpoint = AZURE_OPENAI_ENDPOINT.rstrip("/")
+
     if "services.ai.azure.com" in endpoint or "models.ai.azure.com" in endpoint:
         base_url = endpoint if endpoint.endswith("/models") else f"{endpoint}/models"
+
         client = OpenAI(
             base_url=base_url,
             api_key=AZURE_OPENAI_API_KEY,
         )
+
         model_name = AZURE_OPENAI_DEPLOYMENT_NAME
         mode = f"Live Azure AI Foundry ({model_name})"
+
     elif is_azure_openai_configured():
         client = AzureOpenAI(
             azure_endpoint=AZURE_OPENAI_ENDPOINT,
             api_key=AZURE_OPENAI_API_KEY,
             api_version=AZURE_OPENAI_API_VERSION,
         )
+
         model_name = AZURE_OPENAI_DEPLOYMENT_NAME
         mode = f"Live Azure OpenAI ({model_name})"
+
     elif is_github_models_configured():
         client = OpenAI(
             base_url="https://models.github.ai/inference",
             api_key=GITHUB_TOKEN.strip(),
         )
+
         model_name = "gpt-4o-mini"
         mode = "Live Azure-Hosted GitHub Models (GPT-4o-mini)"
+
     else:
         raise ValueError("No GenAI provider configured.")
 
-    prompt = f"""You are a recruitment fraud risk assessor. Given the following extracted job offer
-details and analysis results, provide a risk verdict (Low/Medium/High) and a clear,
-plain-English explanation citing specific red flags. Be advisory, not definitive.
-Do not make absolute accusations against any named company.
+    prompt = f"""
+You are SafeApply, a recruitment-risk explanation assistant.
 
-CRITICAL RESPONSIBLE AI EVALUATION RULES:
-1. PROTECTIVE DISCLAIMERS: If the offer states that the company "never charges any fee", "does not ask for money", or "no fee is required", this is a legitimate corporate anti-fraud notice, NOT an upfront fee solicitation! Do NOT flag it as a scam.
-2. LEGITIMATE OFFERS: If domain_verification is "VERIFIED_DOMAIN" (e.g. microsoft.com, infosys.com, razorpay.com) and no upfront payments or sensitive banking data are demanded, the risk_level MUST be "Low" (risk_score <= 25).
-3. HIGH RISK OFFERS: Assign "High" risk ONLY when there is clear affirmative fraud: candidate is required to pay fees/deposits (via UPI/transfer), upload unredacted Aadhaar/debit cards, or contact exclusively via unverified Telegram/chat handles.
-4. AMBIGUOUS OFFERS: Assign "Medium" risk (risk_score strictly between 30 and 55) if an informal recruiter uses generic email (@gmail/@yahoo) or short deadline, but does NOT ask for money or passwords. Do NOT assign High risk.
+Your job is to EXPLAIN an evidence-based assessment.
+You must not invent evidence and must not independently alter the supplied
+risk verdict or risk score.
 
-Extracted data:
+SOURCE PRIORITY:
+1. ORIGINAL OFFER TEXT = primary evidence.
+2. Extracted data = structured observations derived from the offer.
+3. Domain and salary tool outputs = deterministic tool findings.
+4. RAG results = contextual reference patterns only.
+
+STRICT GROUNDING RULES:
+- RAG documents are NOT statements about the current offer.
+- A retrieved fraud pattern may contain details that do not exist in the
+  current offer.
+- Never transfer unsupported details from a RAG pattern into the explanation.
+- Never claim that a UPI PIN, OTP, password, debit card, credit card,
+  bank login, Aadhaar, PAN, passport, or payment was requested unless
+  the ORIGINAL OFFER TEXT directly supports that claim.
+- The word "UPI" does NOT imply "UPI PIN".
+- A bank-account request does NOT imply a password, OTP, PIN, or debit-card request.
+- Mention only evidence that appears in the original offer or deterministic
+  tool outputs.
+- If evidence is ambiguous, describe it as ambiguous.
+- Do not accuse a named company of fraud. Describe the communication as
+  containing patterns associated with recruitment scams.
+
+RAG INTERPRETATION:
+Each RAG result can contain:
+- pattern: a knowledge-base reference pattern
+- evidence: observations actually found in this offer
+
+Use the "evidence" field when describing the CURRENT offer.
+Use the "pattern" field only to explain why that evidence is relevant.
+
+PROTECTIVE NOTICE RULE:
+Statements such as "we never charge fees", "no fee is required", or
+"we do not ask for money" are protective language unless the same offer
+separately contains an affirmative request to pay money.
+
+FIXED ASSESSMENT:
+Risk Level: {deterministic_assessment['risk_level']}
+Risk Score: {deterministic_assessment['risk_score']}/100
+
+You MUST return those exact risk values.
+
+ORIGINAL OFFER TEXT:
+{offer_text}
+
+EXTRACTED DATA:
 {json.dumps(extracted_data, indent=2)}
 
-Matched scam patterns (RAG):
+RAG REFERENCE PATTERNS:
 {json.dumps(rag_results, indent=2)}
 
-Domain check result:
+DOMAIN TOOL:
 {json.dumps(domain_check, indent=2)}
 
-Salary check result:
+SALARY TOOL:
 {json.dumps(salary_check, indent=2)}
 
-Respond strictly in valid JSON format with these exact keys:
+Return valid JSON with exactly these keys:
+
 {{
-  "risk_level": "Low" | "Medium" | "High",
-  "risk_score": <integer from 0 to 100>,
-  "explanation": "<plain-English reasoning citing specific red flags>",
-  "identified_red_flags": ["<flag 1>", "<flag 2>"]
+  "risk_level": "{deterministic_assessment['risk_level']}",
+  "risk_score": {deterministic_assessment['risk_score']},
+  "explanation": "<concise explanation using only grounded evidence>",
+  "identified_red_flags": [
+    "<directly supported flag>",
+    "<directly supported flag>"
+  ]
 }}
 """
 
     response = client.chat.completions.create(
         model=model_name,
         messages=[
-            {"role": "system", "content": "You are SafeApply, a Responsible AI recruitment scam detector. Always return valid JSON."},
-            {"role": "user", "content": prompt}
+            {
+                "role": "system",
+                "content": (
+                    "You are SafeApply, a Responsible AI recruitment-risk "
+                    "explanation assistant. Always return valid JSON and never "
+                    "introduce evidence not supported by the original offer."
+                ),
+            },
+            {"role": "user", "content": prompt},
         ],
-        temperature=0.2,
+        temperature=0.1,
     )
 
     content = response.choices[0].message.content.strip()
-    # Strip markdown fences if present
+
     if content.startswith("```"):
         content = re.sub(r"^```(?:json)?\s*", "", content)
         content = re.sub(r"\s*```$", "", content).strip()
 
     try:
         parsed = json.loads(content)
-        verdict = str(parsed.get("risk_level", "Medium")).strip().capitalize()
-        if "High" in verdict:
-            verdict = "High"
-        elif "Low" in verdict:
-            verdict = "Low"
-        else:
-            verdict = "Medium"
-        parsed["risk_level"] = verdict
-
-        # Align numerical score consistently with verdict
-        raw_score = int(float(parsed.get("risk_score", 50)))
-        if verdict == "High":
-            parsed["risk_score"] = max(70, raw_score)
-        elif verdict == "Low":
-            parsed["risk_score"] = min(20, raw_score) if raw_score > 0 else 10
-        else:
-            parsed["risk_score"] = raw_score if 30 <= raw_score <= 60 else 45
-
+        parsed = _sanitize_grounded_output(
+            parsed,
+            offer_text,
+            deterministic_assessment,
+        )
         return parsed, mode
-    except Exception:
-        return {
-            "risk_level": "Medium",
-            "risk_score": 50,
-            "explanation": content,
-            "identified_red_flags": ["Automated extraction completed, manual review advised."]
-        }, mode
+
+    except Exception as exc:
+        print(
+            f"[Agent Grounding Warning] Could not parse/sanitize GenAI JSON: {exc}. "
+            "Using deterministic assessment."
+        )
+        return deterministic_assessment.copy(), mode
 
 
-def synthesize_fallback(extracted_data: dict, rag_results: list, domain_check: dict, salary_check: dict) -> dict:
+def synthesize_fallback(
+    extracted_data: dict,
+    rag_results: list,
+    domain_check: dict,
+    salary_check: dict,
+) -> dict:
     """
-    Deterministic synthesis fallback engine used when Azure OpenAI credentials
-    are not yet active, ensuring seamless local offline evaluation.
+    Deterministic evidence-based scoring engine.
+
+    RAG contributes only when a returned match contains evidence directly
+    observed in the current offer. This keeps local and cloud modes
+    reproducible and prevents retrieved pattern text from becoming a factual
+    claim about the offer.
     """
     risk_score = 10
     flags = []
 
-    # 1. Evaluate RAG matches grouped by unique fraud category
+    # 1. Evaluate grounded RAG evidence, one score contribution per category.
     seen_categories = set()
+
     for match in rag_results:
-        cat = match.get("category", "")
-        if cat in seen_categories:
+        category = match.get("category", "")
+
+        if category in seen_categories:
             continue
-        seen_categories.add(cat)
 
-        weight = match.get("risk_weight", "medium")
-        if cat == "upfront_fee":
-            risk_score += 45
-            flags.append(f"Advance Fee Pattern: {match['pattern']}")
-        elif cat == "urgency_pressure":
-            risk_score += 20
-            flags.append(f"Urgency / Pressure Tactic: {match['pattern']}")
-        elif cat == "premature_personal_info":
+        seen_categories.add(category)
+
+        evidence_items = [
+            str(item)
+            for item in match.get("evidence", [])
+            if str(item).strip()
+        ]
+
+        # Backward compatibility: older/local results may not yet include
+        # evidence. In that case, do not promote the retrieved pattern text
+        # into a factual red flag.
+        if not evidence_items:
+            continue
+
+        if category == "upfront_fee":
             risk_score += 35
-            flags.append(f"Sensitive Data Request: {match['pattern']}")
-        elif cat == "vague_role_process":
-            risk_score += 20
-            flags.append(f"Vague Selection: {match['pattern']}")
-        elif cat == "salary_ratio":
-            risk_score += 25
-            flags.append(f"Suspicious Salary: {match['pattern']}")
-        elif weight == "high":
-            risk_score += 25
-            flags.append(f"Matched Fraud Indicator: {match['pattern']}")
+            flags.extend(evidence_items)
 
-    # 2. Evaluate Domain Verification Tool
-    if domain_check.get("is_flagged"):
-        if domain_check.get("severity") == "HIGH":
-            risk_score += 35
-            flags.append(domain_check.get("message", "Suspicious or generic recruiter email domain."))
-        else:
-            risk_score += 25
-            flags.append(domain_check.get("message", "Generic email service used."))
-
-    # 3. Evaluate Salary Sanity Tool
-    if salary_check.get("is_flagged"):
-        if salary_check.get("severity") == "HIGH":
-            risk_score += 30
-            flags.append(salary_check.get("message", "Disproportionate compensation offer."))
-        else:
+        elif category == "urgency_pressure":
             risk_score += 15
-            flags.append(salary_check.get("message", "Unusual salary structure."))
+            flags.extend(evidence_items)
 
-    # 4. Check unverified requested actions
+        elif category == "premature_personal_info":
+            risk_score += 30
+            flags.extend(evidence_items)
+
+        elif category == "vague_role_process":
+            risk_score += 15
+            flags.extend(evidence_items)
+
+        elif category == "salary_ratio":
+            risk_score += 25
+            flags.extend(evidence_items)
+
+        elif category == "fake_check_equipment":
+            risk_score += 35
+            flags.extend(evidence_items)
+
+        elif category == "domain_mismatch":
+            # Domain scoring is handled by the dedicated domain tool below.
+            # Keep the evidence for explanation without double-counting.
+            flags.extend(evidence_items)
+
+    # 2. Domain/company verification tool.
+    if domain_check.get("is_flagged"):
+        severity = domain_check.get("severity", "LOW")
+
+        if severity == "HIGH":
+            risk_score += 30
+        elif severity == "MEDIUM":
+            risk_score += 25
+        else:
+            risk_score += 5
+
+        message = domain_check.get(
+            "message",
+            "Recruiter contact domain requires independent verification.",
+        )
+
+        if message:
+            flags.append(message)
+
+    # 3. Salary sanity checker.
+    if salary_check.get("is_flagged"):
+        severity = salary_check.get("severity", "LOW")
+
+        if severity == "HIGH":
+            risk_score += 25
+        elif severity == "MEDIUM":
+            risk_score += 15
+        else:
+            risk_score += 5
+
+        message = salary_check.get(
+            "message",
+            "The compensation claim warrants additional verification.",
+        )
+
+        if message:
+            flags.append(message)
+
+    # 4. If extraction found suspicious actions but RAG returned no grounded
+    # category, add a small caution score without inventing a stronger claim.
     if extracted_data.get("requested_actions") and not rag_results:
-        risk_score += 15
-        flags.append(f"Contains urgent or specific action requests: {', '.join([a.split(' ')[0] for a in extracted_data['requested_actions'][:2]])}")
+        risk_score += 10
 
-    # Deduplicate flags
+        actions = [
+            str(action)
+            for action in extracted_data.get("requested_actions", [])[:3]
+            if str(action).strip()
+        ]
+
+        if actions:
+            flags.append(
+                "The offer contains action requests that warrant verification: "
+                + ", ".join(actions)
+                + "."
+            )
+
     unique_flags = list(dict.fromkeys(flags))
-
-    # Cap score
     risk_score = min(max(risk_score, 5), 98)
 
-    # Verdict assignment
-    if risk_score >= 60:
+    if risk_score >= 65:
         verdict = "High"
-        explanation = (
-            f"This communication exhibits multiple significant indicators commonly associated with recruitment fraud. "
-            f"Specifically: {'; '.join(unique_flags[:3])}. Legitimate employers do not request advance payments, "
-            f"personal banking credentials, or recruit exclusively through unverified channels."
-        )
+
+        if unique_flags:
+            evidence_summary = "; ".join(unique_flags[:3])
+            explanation = (
+                "This communication contains multiple significant recruitment-risk "
+                f"indicators. Observed evidence includes: {evidence_summary}. "
+                "Verify the recruiter independently before sending money, identity "
+                "documents, financial information, or other sensitive data."
+            )
+        else:
+            explanation = (
+                "This communication contains multiple significant recruitment-risk "
+                "indicators. Independent verification is strongly recommended before proceeding."
+            )
+
     elif risk_score >= 35:
         verdict = "Medium"
-        explanation = (
-            f"This offer displays ambiguous characteristics that warrant caution. "
-            f"Identified signals include: {'; '.join(unique_flags[:2])}. Candidates are advised to contact the company's "
-            f"official HR department or career portal before proceeding."
-        )
+
+        if unique_flags:
+            evidence_summary = "; ".join(unique_flags[:2])
+            explanation = (
+                "This offer contains signals that warrant additional verification. "
+                f"Observed evidence includes: {evidence_summary}. "
+                "Confirm the recruiter through an independently obtained corporate "
+                "contact or official careers portal before proceeding."
+            )
+        else:
+            explanation = (
+                "This offer contains ambiguous characteristics that warrant additional "
+                "verification before proceeding."
+            )
+
     else:
         verdict = "Low"
         explanation = (
-            "No common recruitment scam indicators were identified. The offer exhibits standard corporate communication patterns, "
-            "verified contact domains, and does not solicit fees or premature sensitive credentials."
+            "No strong recruitment-scam indicators were identified by the current "
+            "evidence checks. This is an advisory result, so the employer and recruiter "
+            "should still be independently verified before sensitive information is shared."
         )
 
     return {
         "risk_level": verdict,
         "risk_score": risk_score,
         "explanation": explanation,
-        "identified_red_flags": unique_flags if unique_flags else ["No scam red flags detected."]
+        "identified_red_flags": (
+            unique_flags
+            if unique_flags
+            else ["No strong scam red flags detected by the current checks."]
+        ),
     }
 
 
@@ -303,16 +530,36 @@ def analyze_job_offer(offer_text: str) -> dict:
         offer_text=offer_text,
     )
 
-    # Step 6: GenAI Synthesis Layer
+    # Step 6: Deterministic assessment first, then optional GenAI explanation.
+    deterministic_assessment = synthesize_fallback(
+        extracted_data,
+        rag_results,
+        domain_check,
+        salary_check,
+    )
+
     if is_genai_active():
         try:
-            synthesis, mode = synthesize_with_genai(extracted_data, rag_results, domain_check, salary_check)
+            synthesis, mode = synthesize_with_genai(
+                offer_text,
+                extracted_data,
+                rag_results,
+                domain_check,
+                salary_check,
+                deterministic_assessment,
+            )
+
         except Exception as e:
-            print(f"[Agent Synthesis Error] GenAI call failed: {e}. Using deterministic engine.")
-            synthesis = synthesize_fallback(extracted_data, rag_results, domain_check, salary_check)
+            print(
+                f"[Agent Synthesis Error] GenAI call failed: {e}. "
+                "Using deterministic engine."
+            )
+
+            synthesis = deterministic_assessment
             mode = "Deterministic Advisory Engine (API Fallback)"
+
     else:
-        synthesis = synthesize_fallback(extracted_data, rag_results, domain_check, salary_check)
+        synthesis = deterministic_assessment
         mode = "Advisory Synthesis Engine (Local Mode)"
 
     return {

@@ -4,13 +4,19 @@ Interactive Web Application built with Streamlit
 Demonstrating GenAI, RAG, Agent Orchestration, Tool Use, and Responsible AI.
 """
 
-import streamlit as st
 import time
-from agent import analyze_job_offer, is_azure_openai_configured, is_github_models_configured
+import streamlit as st
+
+from agent import (
+    analyze_job_offer,
+    is_azure_openai_configured,
+    is_github_models_configured,
+)
 from extractor import is_azure_language_configured
 from search_indexer import is_azure_configured as is_azure_search_configured
 
-# Page configuration
+
+# ----------------- PAGE CONFIGURATION -----------------
 st.set_page_config(
     page_title="SafeApply — AI Recruitment Scam Detector",
     page_icon="🛡️",
@@ -18,68 +24,89 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Custom CSS for modern styling
-st.markdown("""
-<style>
-    .main-title {
-        font-size: 2.3rem;
-        font-weight: 800;
-        background: linear-gradient(90deg, #0078D4 0%, #00B4D8 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin-bottom: 0.2rem;
-    }
-    .sub-title {
-        font-size: 1.05rem;
-        color: #555555;
-        margin-bottom: 1.5rem;
-    }
-    .risk-card {
-        padding: 1.2rem;
-        border-radius: 12px;
-        margin-bottom: 1.2rem;
-        border: 1px solid #e0e0e0;
-    }
-    .risk-badge {
-        display: inline-block;
-        font-size: 1.3rem;
-        font-weight: 700;
-        padding: 0.35rem 1.2rem;
-        border-radius: 20px;
-        color: white;
-        margin-bottom: 0.8rem;
-    }
-    .badge-high {
-        background-color: #D32F2F;
-    }
-    .badge-medium {
-        background-color: #F57C00;
-    }
-    .badge-low {
-        background-color: #2E7D32;
-    }
-    .metric-box {
-        background-color: #F8F9FA;
-        padding: 0.8rem 1rem;
-        border-radius: 8px;
-        border-left: 4px solid #0078D4;
-        margin-bottom: 0.5rem;
-    }
-    .disclaimer-card {
-        background-color: #EFF6FF;
-        border-left: 5px solid #0078D4;
-        padding: 1rem;
-        border-radius: 8px;
-        font-size: 0.9rem;
-        color: #1E3A8A;
-        margin-top: 1.5rem;
-    }
-</style>
-""", unsafe_allow_html=True)
 
-# Preset sample offers for 1-click evaluation
+# ----------------- STYLING -----------------
+st.markdown(
+    """
+    <style>
+        .main-title {
+            font-size: 1.9rem;
+            font-weight: 700;
+            color: var(--text-color);
+            margin-bottom: 0.15rem;
+        }
+
+        .sub-title {
+            font-size: 0.95rem;
+            color: var(--text-color);
+            opacity: 0.65;
+            margin-bottom: 1.6rem;
+            max-width: 720px;
+        }
+
+        .risk-badge {
+            display: inline-block;
+            font-size: 0.95rem;
+            font-weight: 600;
+            padding: 0.25rem 0.85rem;
+            border-radius: 6px;
+            letter-spacing: 0.02em;
+        }
+
+        .badge-high { background-color: rgba(239, 68, 68, 0.16); color: #ef4444; }
+        .badge-medium { background-color: rgba(245, 158, 11, 0.16); color: #f59e0b; }
+        .badge-low { background-color: rgba(34, 197, 94, 0.16); color: #22c55e; }
+
+        .section-label {
+            font-size: 0.78rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--text-color);
+            opacity: 0.55;
+            margin-bottom: 0.4rem;
+        }
+
+        .attr-row {
+            font-size: 0.92rem;
+            color: var(--text-color);
+            opacity: 0.85;
+            padding: 0.15rem 0;
+        }
+
+        .attr-row b { opacity: 1; }
+
+        .disclaimer-box {
+            border-left: 3px solid rgba(148, 163, 184, 0.7);
+            background-color: rgba(148, 163, 184, 0.08);
+            padding: 0.85rem 1rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            color: var(--text-color);
+            opacity: 0.85;
+            margin-top: 1.2rem;
+        }
+
+        .status-line {
+            font-size: 0.85rem;
+            color: var(--text-color);
+            opacity: 0.85;
+            padding: 0.1rem 0;
+        }
+
+        div[data-testid="stMetricValue"] {
+            font-size: 1.4rem;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# ----------------- PRESET SAMPLES -----------------
 PRESET_SAMPLES = {
     "Select a preset sample or paste custom text...": "",
+
     "🚨 High Risk Scam (Advance Fee & Fake Domain)": (
         "Congratulations! You have been selected at TechCorp Solutions for the role of Graduate Software Engineer.\n"
         "Annual package: INR 8,00,000 per annum.\n"
@@ -87,6 +114,7 @@ PRESET_SAMPLES = {
         "of Rs 1,499 via UPI within 2 hours.\n"
         "Send your payment confirmation screenshot immediately to hr.techcorp@gmail.com or your candidature will be permanently cancelled."
     ),
+
     "✅ Legitimate Offer (Microsoft India Internship)": (
         "Dear Candidate,\n\n"
         "Following your technical interviews with our engineering team, we are pleased to offer you an internship at Microsoft India (R&D) Pvt. Ltd.\n\n"
@@ -98,6 +126,7 @@ PRESET_SAMPLES = {
         "University Recruiting Team, Microsoft India\n"
         "Email: university-recruiting@microsoft.com"
     ),
+
     "⚠️ Ambiguous Offer (Unverified Small Agency)": (
         "Hi,\n\n"
         "I found your profile on LinkedIn for our boutique digital marketing agency, Apex Media.\n"
@@ -106,76 +135,100 @@ PRESET_SAMPLES = {
         "Regards,\n"
         "Karan\n"
         "Email: karan.apexmedia@gmail.com"
-    )
+    ),
 }
+
 
 # ----------------- SIDEBAR -----------------
 with st.sidebar:
-    st.image("https://img.icons8.com/color/96/shield.png", width=64)
-    st.markdown("### SafeApply Cloud Status")
-    st.markdown("Azure Services Integration for Student Evaluation:")
+    st.markdown("### 🛡️ SafeApply")
+    st.caption("Cloud service status")
 
-    # Service Status Indicators
     if is_azure_openai_configured():
-        foundry_status = "🟢 Active (Azure AI Foundry)"
+        foundry_status = "🟢 Active — Azure AI Foundry"
     elif is_github_models_configured():
-        foundry_status = "🟢 Active (Azure GitHub Models)"
+        foundry_status = "🟢 Active — GitHub Models"
     else:
-        foundry_status = "🟡 Quota Pending / Local Mode"
+        foundry_status = "🟡 Local mode"
 
-    search_status = "🟢 Active" if is_azure_search_configured() else "🟡 Local RAG Mode"
-    lang_status = "🟢 Active" if is_azure_language_configured() else "🟡 Regex Heuristics Mode"
+    search_status = "🟢 Active" if is_azure_search_configured() else "🟡 Local RAG"
+    lang_status = "🟢 Active" if is_azure_language_configured() else "🟡 Regex heuristics"
 
-    st.markdown(f"- **GenAI (GPT-4o-mini)**: {foundry_status}")
-    st.markdown(f"- **Azure AI Search (F0 Tier)**: {search_status}")
-    st.markdown(f"- **Azure AI Language (F0 Tier)**: {lang_status}")
+    st.markdown(
+        f"<div class='status-line'><b>GenAI</b> — {foundry_status}</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div class='status-line'><b>Search / RAG</b> — {search_status}</div>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f"<div class='status-line'><b>Language</b> — {lang_status}</div>",
+        unsafe_allow_html=True,
+    )
 
-    st.markdown("---")
-    st.markdown("### AI-103 Concepts Demonstrated")
-    st.markdown("1. **GenAI**: GPT-4o-mini Risk Synthesis")
-    st.markdown("2. **RAG**: Azure AI Search Similarity Retrieval")
-    st.markdown("3. **Agent Orchestration**: Multi-Tool Coordination")
-    st.markdown("4. **Tool Use**: Domain & Salary Sanity Checkers")
-    st.markdown("5. **Responsible AI**: False-Positive Resistance")
+    st.divider()
+    st.caption("AI-103 concepts demonstrated")
+    st.markdown(
+        "- GenAI grounded explanation\n"
+        "- Evidence-grounded RAG retrieval\n"
+        "- Agent orchestration\n"
+        "- Domain & salary tool use\n"
+        "- Responsible AI guardrails"
+    )
 
-    st.markdown("---")
-    st.markdown("**Version:** 1.0.0 (Azure Evaluation Build)")
-    st.markdown("Project: SafeApply Recruitment Scam Detector")
+    st.divider()
+    st.caption("v1.0.0 · SafeApply Recruitment Scam Detector")
 
 
 # ----------------- MAIN HEADER -----------------
-st.markdown('<div class="main-title">🛡️ SafeApply — AI Recruitment Scam Detector</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-title">🛡️ SafeApply</div>', unsafe_allow_html=True)
+
 st.markdown(
-    '<div class="sub-title">Intelligent AI agent that analyzes job offers, flags fraud indicators (fake fees, mismatched domains, unrealistic salaries), and gives students a clear risk score with plain-English advisory explanations.</div>',
+    '<div class="sub-title">'
+    "An AI agent that reads a job offer, checks it against known scam patterns, "
+    "verifies the domain and salary, and gives a plain-English risk read — advisory, not a verdict."
+    "</div>",
     unsafe_allow_html=True,
 )
 
+
 # ----------------- INPUT SECTION -----------------
-col_preset, col_clear = st.columns([3, 1])
-with col_preset:
-    selected_preset = st.selectbox(
-        "Choose a sample offer to test instantly, or type your own below:",
-        options=list(PRESET_SAMPLES.keys()),
-        index=0
-    )
-
-default_text = PRESET_SAMPLES[selected_preset] if selected_preset != "Select a preset sample or paste custom text..." else ""
-
-offer_input = st.text_area(
-    "Paste the full job offer email, message, or placement letter text here:",
-    value=default_text,
-    height=180,
-    placeholder="Paste email text, WhatsApp message, or campus placement offer letter here..."
+selected_preset = st.selectbox(
+    "Try a sample, or paste your own offer below",
+    options=list(PRESET_SAMPLES.keys()),
+    index=0,
+    label_visibility="visible",
 )
 
-analyze_button = st.button("🔍 Analyze Offer for Scam Red Flags", type="primary", use_container_width=True)
+default_text = (
+    PRESET_SAMPLES[selected_preset]
+    if selected_preset != "Select a preset sample or paste custom text..."
+    else ""
+)
+
+offer_input = st.text_area(
+    "Job offer text",
+    value=default_text,
+    height=170,
+    placeholder="Paste the email, WhatsApp message, or placement letter text here...",
+    label_visibility="collapsed",
+)
+
+analyze_button = st.button(
+    "🔍 Analyze Offer",
+    type="primary",
+    use_container_width=False,
+)
+
 
 # ----------------- ANALYSIS RESULTS -----------------
 if analyze_button:
     if not offer_input or len(offer_input.strip()) < 15:
         st.warning("Please enter or select a valid job offer text to analyze.")
+
     else:
-        with st.spinner("🤖 SafeApply Agent executing extraction, RAG pattern retrieval, and GenAI synthesis..."):
+        with st.spinner("Running extraction, RAG retrieval, and synthesis..."):
             start_time = time.time()
             result = analyze_job_offer(offer_input)
             latency = time.time() - start_time
@@ -183,105 +236,222 @@ if analyze_button:
         risk_level = result["risk_level"]
         risk_score = result["risk_score"]
 
-        # Badge styling based on risk verdict
-        if risk_level == "High":
-            badge_class = "badge-high"
-            badge_icon = "🚨 HIGH RISK"
-            border_color = "#D32F2F"
-        elif risk_level == "Medium":
-            badge_class = "badge-medium"
-            badge_icon = "⚠️ MEDIUM RISK"
-            border_color = "#F57C00"
-        else:
-            badge_class = "badge-low"
-            badge_icon = "✅ LOW RISK"
-            border_color = "#2E7D32"
+        badge_map = {
+            "High": ("badge-high", "High risk"),
+            "Medium": ("badge-medium", "Medium risk"),
+            "Low": ("badge-low", "Low risk"),
+        }
 
-        st.markdown("---")
-        st.markdown(f"### Assessment Verdict")
+        badge_class, badge_label = badge_map.get(
+            risk_level,
+            ("badge-medium", risk_level),
+        )
 
-        # Top Banner Card
-        st.markdown(f"""
-        <div class="risk-card" style="border-left: 8px solid {border_color};">
-            <span class="risk-badge {badge_class}">{badge_icon} (Risk Score: {risk_score}/100)</span>
-            <p style="font-size: 1.1rem; line-height: 1.6; margin-top: 0.5rem;"><b>Summary:</b> {result['explanation']}</p>
-            <p style="font-size: 0.85rem; color: #666;">⚡ Processed in {latency:.2f}s via <b>{result['execution_mode']}</b></p>
-        </div>
-        """, unsafe_allow_html=True)
+        st.divider()
 
-        # Three-column layout for details
-        col1, col2 = st.columns([1, 1])
+        with st.container(border=True):
+            top = st.columns([3, 1])
+
+            with top[0]:
+                st.markdown(
+                    f'<span class="risk-badge {badge_class}">{badge_label}</span>',
+                    unsafe_allow_html=True,
+                )
+                st.write(result["explanation"])
+
+            with top[1]:
+                st.metric("Risk score", f"{risk_score}/100")
+
+            st.caption(
+                f"Processed in {latency:.2f}s · {result['execution_mode']}"
+            )
+
+        st.write("")
+        col1, col2 = st.columns(2)
 
         with col1:
-            st.markdown("#### 📋 Extracted Offer Attributes")
-            extracted = result.get("extracted_data", {})
-            st.markdown(f"**Company Name:** `{extracted.get('company_name', 'Not specified')}`")
-            st.markdown(f"**Offered Salary:** `{extracted.get('salary', 'Not specified')}`")
-            st.markdown(f"**Contact Email:** `{extracted.get('contact_email', 'Not specified')}`")
-            st.markdown(f"**Domain:** `{extracted.get('contact_domain', 'Not specified')}`")
-            
-            actions = extracted.get("requested_actions", [])
-            if actions:
-                st.markdown("**Identified Action Requests:**")
-                for act in actions:
-                    st.markdown(f"- {act}")
-            else:
-                st.markdown("**Identified Action Requests:** `None flagged`")
+            st.markdown(
+                '<div class="section-label">Extracted attributes</div>',
+                unsafe_allow_html=True,
+            )
+
+            with st.container(border=True):
+                extracted = result.get("extracted_data", {})
+
+                st.markdown(
+                    f"<div class='attr-row'><b>Company</b> — {extracted.get('company_name', 'Not specified')}</div>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    f"<div class='attr-row'><b>Salary</b> — {extracted.get('salary', 'Not specified')}</div>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    f"<div class='attr-row'><b>Email</b> — {extracted.get('contact_email', 'Not specified')}</div>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    f"<div class='attr-row'><b>Domain</b> — {extracted.get('contact_domain', 'Not specified')}</div>",
+                    unsafe_allow_html=True,
+                )
+
+                actions = extracted.get("requested_actions", [])
+
+                if actions:
+                    st.markdown(
+                        "<div class='attr-row' style='margin-top:0.4rem;'><b>Requested actions</b></div>",
+                        unsafe_allow_html=True,
+                    )
+                    for act in actions:
+                        st.markdown(
+                            f"<div class='attr-row'>· {act}</div>",
+                            unsafe_allow_html=True,
+                        )
+                else:
+                    st.markdown(
+                        "<div class='attr-row' style='margin-top:0.4rem;'><b>Requested actions</b> — none flagged</div>",
+                        unsafe_allow_html=True,
+                    )
 
         with col2:
-            st.markdown("#### 🚩 Flagged Red Indicators")
-            flags = result.get("identified_red_flags", [])
-            if flags and flags != ["No scam red flags detected."]:
-                for flag in flags:
-                    st.error(f"• {flag}")
-            else:
-                st.success("• No scam red flags identified. Communication pattern appears standard.")
+            st.markdown(
+                '<div class="section-label">Flagged indicators</div>',
+                unsafe_allow_html=True,
+            )
 
-        # Agent Tools Drilldown
-        st.markdown("---")
-        st.markdown("#### 🛠️ AI Agent Tools Output Drilldown")
+            with st.container(border=True):
+                flags = result.get("identified_red_flags", [])
 
-        tool_tabs = st.tabs(["Tool 1: RAG Red-Flag Checker", "Tool 2: Domain Verification", "Tool 3: Salary Sanity Check"])
+                no_flag_messages = {
+                    "No scam red flags detected.",
+                    "No strong scam red flags detected by the current checks.",
+                }
+
+                if flags and not (
+                    len(flags) == 1 and flags[0] in no_flag_messages
+                ):
+                    for flag in flags:
+                        st.markdown(
+                            f"<div class='attr-row'>🚩 {flag}</div>",
+                            unsafe_allow_html=True,
+                        )
+                else:
+                    st.markdown(
+                        "<div class='attr-row'>No strong red flags identified by the current checks.</div>",
+                        unsafe_allow_html=True,
+                    )
+
+        st.write("")
+        st.markdown(
+            '<div class="section-label">Agent tool outputs</div>',
+            unsafe_allow_html=True,
+        )
+
+        tool_tabs = st.tabs(
+            [
+                "RAG red-flag checker",
+                "Domain verification",
+                "Salary sanity check",
+            ]
+        )
 
         with tool_tabs[0]:
             rag_matches = result["tool_outputs"].get("rag_matches", [])
+
             if rag_matches:
-                st.write(f"Matched **{len(rag_matches)}** patterns from the Azure AI Search Recruitment Fraud Knowledge Base:")
-                for m in rag_matches:
-                    st.info(f"**Category:** `{m['category']}` | **Match Confidence:** `{m['score']}`\n\n**Pattern:** {m['pattern']}")
+                st.caption(
+                    f"{len(rag_matches)} grounded pattern reference(s) "
+                    "retrieved from the scam-pattern knowledge base"
+                )
+
+                for match in rag_matches:
+                    with st.container(border=True):
+                        st.markdown(
+                            f"**{match.get('category', 'Unknown')}** "
+                            f"&nbsp;·&nbsp; Search Score `{match.get('score', 0)}`"
+                        )
+
+                        st.markdown("**Retrieved Pattern**")
+                        st.caption(
+                            match.get(
+                                "pattern",
+                                "No reference pattern available.",
+                            )
+                        )
+
+                        evidence = match.get("evidence", [])
+
+                        if evidence:
+                            st.markdown("**Observed Evidence in This Offer**")
+
+                            for item in evidence:
+                                st.caption(f"• {item}")
+                        else:
+                            st.caption(
+                                "No directly grounded evidence was attached to this reference."
+                            )
+
             else:
-                st.write("No matching scam patterns identified in knowledge base.")
+                st.caption(
+                    "No grounded scam-pattern references were identified in the knowledge base."
+                )
 
         with tool_tabs[1]:
             d_check = result["tool_outputs"].get("domain_verification", {})
-            st.write(f"**Verification Status:** `{d_check.get('status', 'N/A')}`")
-            st.write(f"**Severity Level:** `{d_check.get('severity', 'LOW')}`")
-            st.write(f"**Agent Evaluation:** {d_check.get('message', '')}")
+
+            st.markdown(f"**Status** — {d_check.get('status', 'N/A')}")
+            st.markdown(f"**Severity** — {d_check.get('severity', 'LOW')}")
+            st.caption(d_check.get("message", ""))
 
         with tool_tabs[2]:
             s_check = result["tool_outputs"].get("salary_sanity", {})
-            st.write(f"**Flagged Anomaly:** `{s_check.get('is_flagged', False)}`")
-            st.write(f"**Claimed Compensation:** `{s_check.get('claimed_salary', 'N/A')}`")
-            st.write(f"**Agent Evaluation:** {s_check.get('message', '')}")
 
-        # Responsible AI Advisory Disclaimer Banner
-        st.markdown(f"""
-        <div class="disclaimer-card">
-            <b>⚖️ Responsible AI Notice:</b> {result['responsible_ai_disclaimer']}
-        </div>
-        """, unsafe_allow_html=True)
+            st.markdown(
+                f"**Flagged** — {s_check.get('is_flagged', False)}"
+            )
+            st.markdown(
+                f"**Claimed compensation** — {s_check.get('claimed_salary', 'N/A')}"
+            )
+            st.caption(s_check.get("message", ""))
 
+        st.markdown(
+            f"""
+            <div class="disclaimer-box">
+                <b>Responsible AI notice</b> —
+                {result['responsible_ai_disclaimer']}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+# ----------------- EMPTY / LANDING STATE -----------------
 else:
-    # Initial landing guide
-    st.info("💡 **Quick Start for Evaluators:** Pick one of the sample presets in the dropdown above and click **Analyze Offer** to test live.")
-    
-    col_feat1, col_feat2, col_feat3 = st.columns(3)
-    with col_feat1:
-        st.markdown("### 🔍 RAG Knowledge Base")
-        st.write("Cross-references offer text against 18+ curated recruitment fraud patterns indexed in Azure AI Search.")
-    with col_feat2:
-        st.markdown("### 🤖 Agentic Orchestration")
-        st.write("Coordinates specialized extraction, domain verification, and compensation sanity tools seamlessly.")
-    with col_feat3:
-        st.markdown("### ⚖️ Responsible AI Guardrails")
-        st.write("Built-in false-positive resistance protects legitimate corporate recruiters with cautious advisory phrasing.")
+    st.info(
+        "Pick a sample above and click **Analyze Offer** to see it in action."
+    )
+
+    st.write("")
+    f1, f2, f3 = st.columns(3)
+
+    with f1:
+        with st.container(border=True):
+            st.markdown("**RAG knowledge base**")
+            st.caption(
+                "Cross-references offer evidence against curated recruitment-fraud patterns via Azure AI Search."
+            )
+
+    with f2:
+        with st.container(border=True):
+            st.markdown("**Agent orchestration**")
+            st.caption(
+                "Coordinates extraction, domain verification, salary analysis, deterministic scoring, and GenAI explanation."
+            )
+
+    with f3:
+        with st.container(border=True):
+            st.markdown("**Responsible AI**")
+            st.caption(
+                "Advisory-only phrasing with evidence grounding and false-positive resistance."
+            )
+

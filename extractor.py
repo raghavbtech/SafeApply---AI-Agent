@@ -75,50 +75,131 @@ def extract_company_regex(text: str):
 
 
 def extract_action_phrases(text: str, key_phrases: list = None):
-    """Detect suspicious or critical requested actions from text, respecting negative/protective phrasing."""
-    action_keywords = [
-        "registration fee", "security deposit", "refundable fee", "pay", "deposit",
-        "transfer", "upi", "courier", "purchase", "send aadhaar", "bank details",
-        "bank account", "otp", "pin", "original mark sheet", "telegram", "whatsapp",
-        "respond within", "training handbook", "kit"
-    ]
-    negation_signals = [
-        "no fee", "never charges", "never ask", "never request", "without any fee",
-        "no security deposit", "there is no fee", "no charges", "free of charge",
-        "does not charge", "will not ask", "zero fee"
-    ]
+    """
+    Extract normalized candidate actions directly supported by the offer text.
+
+    These values are intentionally concise because they are consumed by both
+    the UI and the RAG query builder.
+    """
     lower_text = text.lower()
+
+    negation_signals = [
+        "no fee",
+        "no fees",
+        "never charges",
+        "never charge",
+        "does not charge",
+        "will not charge",
+        "never asks for money",
+        "never ask for money",
+        "no security deposit",
+        "there is no fee",
+        "free of charge",
+    ]
+
+    rules = [
+        (
+            "Pay registration/refundable fee",
+            [
+                r"\bregistration fee\b",
+                r"\brefundable fee\b",
+                r"\bonboarding fee\b",
+                r"\bprocessing fee\b",
+            ],
+        ),
+        (
+            "Pay security deposit",
+            [
+                r"\bsecurity deposit\b",
+                r"\brefundable deposit\b",
+            ],
+        ),
+        (
+            "Make payment via UPI",
+            [
+                r"\bpay\b.{0,60}\bupi\b",
+                r"\bupi\b.{0,60}\bpay(?:ment)?\b",
+            ],
+        ),
+        (
+            "Send payment screenshot",
+            [
+                r"\bpayment screenshot\b",
+                r"\btransaction screenshot\b",
+                r"\bpayment proof\b",
+            ],
+        ),
+        (
+            "Provide bank account details",
+            [
+                r"\bbank account\b",
+                r"\baccount number\b",
+                r"\bifsc\b",
+                r"\bbank details\b",
+            ],
+        ),
+        (
+            "Provide government ID copy",
+            [
+                r"\baadhaar\b",
+                r"\baadhar\b",
+                r"\bpan card\b",
+                r"\bpassport copy\b",
+            ],
+        ),
+        (
+            "Share authentication secret",
+            [
+                r"\bupi pin\b",
+                r"\botp\b",
+                r"\bnet banking password\b",
+                r"\binternet banking password\b",
+            ],
+        ),
+        (
+            "Contact via Telegram",
+            [r"\btelegram\b"],
+        ),
+        (
+            "Contact via WhatsApp",
+            [r"\bwhatsapp\b"],
+        ),
+        (
+            "Respond within a short deadline",
+            [
+                r"\bwithin\s+\d+\s+(?:minutes?|hours?)\b",
+                r"\bexpires?\s+(?:today|within)\b",
+                r"\bimmediately\b",
+            ],
+        ),
+        (
+            "Purchase required equipment/material",
+            [
+                r"\bpurchase\b.{0,80}\b(?:software|equipment|kit|handbook|laptop)\b",
+                r"\bbuy\b.{0,80}\b(?:software|equipment|kit|handbook|laptop)\b",
+            ],
+        ),
+    ]
+
+    def is_negated(start: int, end: int) -> bool:
+        context = lower_text[max(0, start - 90):min(len(lower_text), end + 90)]
+        return any(signal in context for signal in negation_signals)
+
     detected = []
 
-    for kw in action_keywords:
-        if kw in lower_text:
-            start = max(0, lower_text.find(kw) - 100)
-            end = min(len(lower_text), lower_text.find(kw) + len(kw) + 60)
-            snippet = lower_text[start:end]
-
-            # Check if this keyword is negated by a legitimate company disclaimer
-            is_negated = any(neg in snippet for neg in negation_signals)
-            if is_negated:
+    for label, patterns in rules:
+        for pattern in patterns:
+            match = re.search(pattern, lower_text, re.IGNORECASE)
+            if not match:
                 continue
 
-            clean_snippet = text[start:end].replace("\n", " ").strip()
-            if kw not in [d.split(" ")[0] for d in detected]:
-                detected.append(f"{kw} ('...{clean_snippet}...')")
+            if is_negated(match.start(), match.end()):
+                continue
 
-    if key_phrases:
-        for kp in key_phrases:
-            kp_low = kp.lower()
-            if any(term in kp_low for term in ["fee", "deposit", "pay", "slot", "account", "aadhaar", "urgent"]):
-                # Check if this key phrase appears in a negated anti-scam context
-                kp_pos = lower_text.find(kp_low)
-                if kp_pos != -1:
-                    surrounding = lower_text[max(0, kp_pos - 80):min(len(lower_text), kp_pos + len(kp_low) + 60)]
-                    if any(neg in surrounding for neg in negation_signals):
-                        continue
-                if kp not in detected:
-                    detected.append(kp)
+            detected.append(label)
+            break
 
-    return detected[:5]
+    return list(dict.fromkeys(detected))[:8]
 
 
 def extract_offer_details(offer_text: str) -> dict:

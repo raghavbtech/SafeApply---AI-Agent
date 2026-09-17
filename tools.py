@@ -17,11 +17,21 @@ DATASET_PATH = os.path.join(os.path.dirname(__file__), "scam_patterns.json")
 SEARCH_ENDPOINT = os.getenv("SEARCH_ENDPOINT", "")
 SEARCH_API_KEY = os.getenv("SEARCH_API_KEY", "")
 SEARCH_INDEX_NAME = os.getenv("SEARCH_INDEX_NAME", "safeapply-scam-patterns")
+RAG_TOP_K = int(os.getenv("SAFEAPPLY_TOP_K", "5"))
 
 GENERIC_DOMAINS = {
     "gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "protonmail.com",
     "icloud.com", "mail.com", "yandex.com", "rediffmail.com", "aol.com",
     "live.com", "gmx.com"
+}
+
+
+KNOWN_COMPANY_DOMAINS = {
+    "microsoft": "microsoft.com",
+    "infosys": "infosys.com",
+    "razorpay": "razorpay.com",
+    "amazon": "amazon.com",
+    "google": "google.com",
 }
 
 
@@ -35,147 +45,256 @@ def load_cached_patterns():
 # ==========================================
 # TOOL 1: RED-FLAG PATTERN CHECKER (RAG)
 # ==========================================
+def _collect_observed_evidence(offer_text: str, extracted_data: dict = None) -> dict:
+    """
+    Identify evidence directly present in the current offer.
+
+    RAG documents are reference patterns only. A retrieved category is allowed
+    into the final tool output only when the current offer contains direct
+    evidence supporting that category.
+    """
+    text = offer_text.lower()
+    extracted_data = extracted_data or {}
+    evidence = {}
+
+    def add(category: str, message: str):
+        evidence.setdefault(category, [])
+        if message not in evidence[category]:
+            evidence[category].append(message)
+
+    fee_terms = (
+        r"registration fee|registration charge|"
+        r"security deposit|security charge|"
+        r"refundable fee|refundable charge|"
+        r"processing fee|processing charge|"
+        r"onboarding fee|onboarding charge|"
+        r"insurance fee|insurance charge|"
+        r"clearance fee|clearance charge|"
+        r"training fee|training charge"
+    )
+
+    fee_patterns = [
+        rf"\b(?:pay|deposit|transfer|remit)\b.{{0,120}}\b(?:{fee_terms})\b",
+        rf"\b(?:{fee_terms})\b.{{0,120}}\b(?:pay|deposit|transfer|remit|upi)\b",
+    ]
+
+    if any(re.search(pattern, text) for pattern in fee_patterns):
+        add("upfront_fee", "The offer asks the candidate to make an upfront fee or deposit payment.")
+
+    if re.search(r"\bwithin\s+\d+\s+(?:minutes?|hours?)\b", text):
+        add("urgency_pressure", "The offer imposes a short deadline measured in minutes or hours.")
+
+    if any(
+        phrase in text
+        for phrase in [
+            "permanently cancelled",
+            "offer will be revoked",
+            "candidature will be cancelled",
+            "blacklisted",
+            "expires today",
+            "immediately or",
+        ]
+    ):
+        add("urgency_pressure", "The offer threatens cancellation or another penalty for delayed action.")
+
+    if any(
+        phrase in text
+        for phrase in ["bank account", "bank details", "account number", "ifsc"]
+    ):
+        add("premature_personal_info", "The offer requests bank-account information.")
+
+    if any(
+        phrase in text
+        for phrase in ["aadhaar", "aadhar", "pan card", "passport copy"]
+    ):
+        add("premature_personal_info", "The offer requests government identity documents.")
+
+    if any(
+        phrase in text
+        for phrase in ["upi pin", "net banking password", "internet banking password", " otp", "otp "]
+    ):
+        add("premature_personal_info", "The offer requests authentication credentials or secrets.")
+
+    if any(
+        phrase in text
+        for phrase in [
+            "no interview required",
+            "no interview needed",
+            "direct selection",
+            "instant hiring",
+            "instant offer",
+        ]
+    ):
+        add("vague_role_process", "The candidate is offered or selected without a normal interview process.")
+
+    domain = str(extracted_data.get("contact_domain", "")).lower()
+    if domain in GENERIC_DOMAINS:
+        add("domain_mismatch", f"The recruiter uses a public email provider (@{domain}).")
+
+    if "telegram" in text:
+        add("domain_mismatch", "The offer directs the candidate to Telegram for recruitment communication.")
+
+    if any(
+        phrase in text
+        for phrase in ["75,000 per month", "36 lpa", "36,00,000", "5,000 per day", "15,000 per day"]
+    ):
+        add(
+            "salary_ratio",
+            "The offer contains compensation commonly associated with unrealistic entry-level or task-work claims.",
+        )
+
+    if "check" in text and any(
+        phrase in text
+        for phrase in ["purchase equipment", "purchase software", "buy equipment", "workstation", "office software"]
+    ):
+        add(
+            "fake_check_equipment",
+            "The offer mentions sending a check to fund equipment or software purchases.",
+        )
+
+    return evidence
+
+
 def check_red_flags_rag(offer_text: str, extracted_data: dict = None) -> list:
     """
     TOOL 1 (Highest Priority): Red-Flag Pattern Checker.
-    Queries Azure AI Search (or local pattern dataset) using RAG retrieval to find
-    matching known recruitment fraud patterns.
+
+    Retrieves fraud-pattern references from Azure AI Search (or the local
+    curated dataset) while grounding every returned category in evidence
+    directly observed in the current offer.
     """
-    offer_lower = offer_text.lower()
-    negation_signals = [
-        "no fee", "never charges", "never ask", "never request", "without any fee",
-        "no security deposit", "there is no fee", "no charges", "free of charge",
-        "does not charge", "will not ask", "zero fee"
-    ]
-    has_anti_fraud_notice = any(neg in offer_lower for neg in negation_signals)
+    extracted_data = extracted_data or {}
+    observed = _collect_observed_evidence(offer_text, extracted_data)
 
-    # Build a clean targeted search query from actions and text
-    search_terms = []
-    if extracted_data and extracted_data.get("requested_actions"):
-        for act in extracted_data["requested_actions"]:
-            kw = act.split("(")[0].strip().strip("'\"")
-            if len(kw) > 2:
-                search_terms.append(kw)
+    if not observed:
+        return []
 
-    raw_query = " ".join(search_terms) if search_terms else offer_text[:120]
-    # Remove special punctuation that confuses search syntax
-    clean_query = re.sub(r'[^\w\s]', ' ', raw_query)
-    query_string = " ".join(clean_query.split()[:12])
+    query_parts = []
 
-    # Attempt live Azure AI Search if credentials exist
+    for action in extracted_data.get("requested_actions", []):
+        if action:
+            query_parts.append(str(action))
+
+    for category, evidence_items in observed.items():
+        query_parts.append(category.replace("_", " "))
+        query_parts.extend(evidence_items)
+
+    query_string = " ".join(dict.fromkeys(query_parts))
+    query_string = re.sub(r"[^\w\s]", " ", query_string)
+    query_string = " ".join(query_string.split())[:900]
+
     if SEARCH_ENDPOINT and SEARCH_API_KEY and "your-search-service" not in SEARCH_ENDPOINT:
         try:
             from azure.core.credentials import AzureKeyCredential
             from azure.search.documents import SearchClient
 
-            credential = AzureKeyCredential(SEARCH_API_KEY)
             client = SearchClient(
                 endpoint=SEARCH_ENDPOINT,
                 index_name=SEARCH_INDEX_NAME,
-                credential=credential,
-                connection_timeout=3,
-                read_timeout=4,
+                credential=AzureKeyCredential(SEARCH_API_KEY),
+                connection_timeout=5,
+                read_timeout=8,
             )
-            results = client.search(
-                search_text=query_string if query_string else "*",
-                select=["id", "category", "pattern", "example_text", "risk_weight"],
-                top=3,
+
+            best_by_category = {}
+
+            # Query each directly observed category independently. This avoids
+            # one high-scoring category crowding another category out of the
+            # global Azure Search result set.
+            for category, evidence_items in observed.items():
+                category_query_parts = [
+                    category.replace("_", " "),
+                    *evidence_items,
+                    *[
+                        str(action)
+                        for action in extracted_data.get("requested_actions", [])
+                    ],
+                ]
+
+                category_query = " ".join(category_query_parts)
+                category_query = re.sub(r"[^\w\s]", " ", category_query)
+                category_query = " ".join(category_query.split())[:700]
+
+                escaped_category = category.replace("'", "''")
+
+                results = client.search(
+                    search_text=category_query if category_query else "*",
+                    search_fields=["pattern", "example_text", "category"],
+                    filter=f"category eq '{escaped_category}'",
+                    select=["id", "category", "pattern", "example_text", "risk_weight"],
+                    top=1,
+                )
+
+                for result in results:
+                    score = float(result.get("@search.score", 0.0))
+
+                    best_by_category[category] = {
+                        "id": result["id"],
+                        "category": category,
+                        "pattern": result["pattern"],
+                        "score": round(score, 2),
+                        "risk_weight": result.get("risk_weight", "medium"),
+                        "evidence": evidence_items,
+                    }
+                    break
+
+            matches = sorted(
+                best_by_category.values(),
+                key=lambda item: item["score"],
+                reverse=True,
             )
-            matches = []
-            for r in results:
-                score = r.get("@search.score", 0.0)
-                if score > 0.5:
-                    if r["category"] == "upfront_fee" and has_anti_fraud_notice:
-                        continue
-                    matches.append({
-                        "category": r["category"],
-                        "pattern": r["pattern"],
-                        "score": round(float(score), 2),
-                        "risk_weight": r.get("risk_weight", "high"),
-                    })
+
             if matches:
-                return matches
+                return matches[:RAG_TOP_K]
+
         except Exception as e:
-            print(f"[RAG Warning] Azure AI Search query error: {e}. Falling back to pattern matcher.")
+            print(
+                f"[RAG Warning] Azure AI Search query error: {e}. "
+                "Falling back to local pattern matcher."
+            )
 
-    # Local fallback RAG retrieval
     patterns = load_cached_patterns()
-    matches = []
+    best_by_category = {}
 
-    # Specific fraud trigger phrases (actionable demands)
-    actionable_triggers = {
-        "upfront_fee": [
-            "pay a refundable", "pay registration", "registration fee", "pay rs", "pay inr",
-            "security deposit", "courier insurance", "transit insurance", "insurance charge",
-            "clearance charge", "training material", "purchase the mandatory", "handbook and software kit",
-            "registration charge", "pay via upi", "transfer refundable", "refundable transit"
-        ],
-        "urgency_pressure": [
-            "within 2 hours", "within 60 minutes", "within 24 hours", "permanently cancelled",
-            "blacklisted from future", "expires strictly at", "urgent notice: only",
-            "confirm your attendance by", "by 6:00 pm today", "by 4:00 pm today"
-        ],
-        "domain_mismatch": [
-            "telegram @", "@amazonjobs", "@google-hiring", "careers@google-hiring", "hr.microsoftrecruitment"
-        ],
-        "salary_ratio": [
-            "75,000 per month", "36 lpa", "36,00,000", "5,000 to rs 15,000 per day",
-            "subscribing to youtube channels", "daily bonus. no experience"
-        ],
-        "premature_personal_info": [
-            "aadhaar card", "aadhaar", "debit card", "credit card", "pan card",
-            "debit card photos", "front photo of debit card", "net banking password",
-            "bank account number", "ifsc code", "original 10th, 12th", "physical retention",
-            "courier their original", "front and back aadhaar"
-        ],
-        "vague_role_process": [
-            "no interview needed", "direct selection notice", "5-minute chat on whatsapp",
-            "duties will be assigned after joining", "no interview, no experience"
-        ]
+    query_words = {
+        word for word in query_string.lower().split()
+        if len(word) > 3
     }
 
-    scored_patterns = []
-    for p in patterns:
-        category = p["category"]
+    for pattern in patterns:
+        category = pattern["category"]
 
-        # Skip fee checks if legitimate anti-fraud disclaimer is present
-        if category == "upfront_fee" and has_anti_fraud_notice:
+        if category not in observed:
             continue
 
-        cat_triggers = actionable_triggers.get(category, [])
-        # Check if ANY actionable trigger for this category is present
-        matched_triggers = [trig for trig in cat_triggers if trig in offer_lower]
-        if not matched_triggers:
-            continue
+        source = (
+            f"{pattern['category']} "
+            f"{pattern['pattern']} "
+            f"{pattern['example_text']}"
+        ).lower()
 
-        score = len(matched_triggers) * 3
+        overlap = sum(1 for word in query_words if word in source)
 
-        # Match example text similarity if prominent phrases overlap
-        for example_phrase in [p["example_text"][:40].lower(), p["pattern"].lower()]:
-            stop_words = {
-                "candidate", "selection", "interview", "interviews", "software", "position",
-                "company", "campus", "recruitment", "technical", "formal", "process",
-                "hiring", "package", "joining", "location", "development", "training",
-                "application", "candidates", "letter", "centre", "regarding", "portal",
-                "within", "please", "email", "their", "before", "after", "hours"
-            }
-            key_terms = [w for w in example_phrase.split() if len(w) > 4 and w not in stop_words]
-            match_count = sum(1 for term in key_terms if term in offer_lower)
-            if match_count >= 2:
-                score += 2
+        item = {
+            "id": pattern["id"],
+            "category": category,
+            "pattern": pattern["pattern"],
+            "score": float(overlap),
+            "risk_weight": pattern.get("risk_weight", "medium"),
+            "evidence": observed[category],
+        }
 
-        scored_patterns.append((score, p))
+        existing = best_by_category.get(category)
+        if not existing or item["score"] > existing["score"]:
+            best_by_category[category] = item
 
-    scored_patterns.sort(key=lambda x: x[0], reverse=True)
-    for score, p in scored_patterns[:3]:
-        matches.append({
-            "category": p["category"],
-            "pattern": p["pattern"],
-            "score": round(min(score / 5.0, 1.0), 2),
-            "risk_weight": p.get("risk_weight", "high"),
-        })
+    matches = sorted(
+        best_by_category.values(),
+        key=lambda item: item["score"],
+        reverse=True,
+    )
 
-    return matches
+    return matches[:RAG_TOP_K]
 
 
 # ==========================================
@@ -184,63 +303,125 @@ def check_red_flags_rag(offer_text: str, extracted_data: dict = None) -> list:
 def verify_company_domain(company_name: str, contact_domain: str, full_email: str = "") -> dict:
     """
     TOOL 2: Domain/Company Verification.
-    Compares the claimed company name against the sender's email domain or communication channel.
-    Flags generic domains (gmail, yahoo) for corporate roles and detects typosquatted/spoofed domains.
+
+    Flags free/public email providers and suspicious domains. A domain is only
+    labelled VERIFIED_DOMAIN when it matches a known organization/domain pair.
+    Unknown professional domains remain unverified rather than being treated as
+    automatically trusted.
     """
     company_clean = company_name.strip().lower() if company_name else "not specified"
     domain_clean = contact_domain.strip().lower() if contact_domain else "unknown"
 
-    # Flag 1: No domain or chat handle only
     if domain_clean in ["unknown", "not specified"]:
         return {
             "status": "UNVERIFIED",
             "is_flagged": True,
             "severity": "MEDIUM",
-            "message": "No official recruiter contact email or domain could be identified."
+            "message": "No official recruiter contact email or domain could be identified.",
         }
 
-    if "telegram" in domain_clean or "chat-handle" in domain_clean or "@" in full_email and not "." in contact_domain:
+    if (
+        "telegram" in domain_clean
+        or "chat-handle" in domain_clean
+        or ("@" in full_email and "." not in contact_domain)
+    ):
         return {
             "status": "SUSPICIOUS_CHANNEL",
             "is_flagged": True,
             "severity": "HIGH",
-            "message": "Recruiter conducts official communication solely via Telegram/WhatsApp handle without corporate email."
+            "message": "Recruiter conducts official communication solely via Telegram/WhatsApp handle without corporate email.",
         }
 
-    # Flag 2: Generic email provider used by corporate entity
     if domain_clean in GENERIC_DOMAINS:
         if company_clean not in ["not specified", "freelance", "individual"]:
             return {
                 "status": "MISMATCH_GENERIC_DOMAIN",
                 "is_flagged": True,
                 "severity": "HIGH",
-                "message": f"Sender uses a free public email service (@{domain_clean}) while claiming to represent '{company_name}'. Reputable enterprises recruit exclusively via verified corporate domains."
-            }
-        else:
-            return {
-                "status": "GENERIC_DOMAIN",
-                "is_flagged": True,
-                "severity": "MEDIUM",
-                "message": f"Recruiter is using a free public email provider (@{domain_clean})."
+                "message": (
+                    f"Sender uses a free public email service (@{domain_clean}) "
+                    f"while claiming to represent '{company_name}'. Verify the "
+                    "recruiter through the organization's official careers site "
+                    "or another independently obtained contact channel."
+                ),
             }
 
-    # Flag 3: Typosquatting / deceptive domain
+        return {
+            "status": "GENERIC_DOMAIN",
+            "is_flagged": True,
+            "severity": "MEDIUM",
+            "message": f"Recruiter is using a free public email provider (@{domain_clean}).",
+        }
+
     suspicious_patterns = [r"-hiring", r"-jobs", r"-careers", r"-portal", r"official-"]
-    for sp in suspicious_patterns:
-        if re.search(sp, domain_clean):
+    for pattern in suspicious_patterns:
+        if re.search(pattern, domain_clean):
             return {
                 "status": "POTENTIAL_SPOOFED_DOMAIN",
                 "is_flagged": True,
                 "severity": "HIGH",
-                "message": f"Domain '@{domain_clean}' appears suspicious and may be mimicking a legitimate organization."
+                "message": (
+                    f"Domain '@{domain_clean}' contains a naming pattern commonly "
+                    "used by unofficial recruitment domains and should be independently verified."
+                ),
             }
 
-    # Verified domain looks standard
+    for company_token, expected_domain in KNOWN_COMPANY_DOMAINS.items():
+        if company_token in company_clean:
+            if (
+                domain_clean == expected_domain
+                or domain_clean.endswith("." + expected_domain)
+            ):
+                return {
+                    "status": "VERIFIED_DOMAIN",
+                    "is_flagged": False,
+                    "severity": "LOW",
+                    "message": (
+                        f"Recruiter domain '@{domain_clean}' matches the expected "
+                        f"corporate domain for {company_name}."
+                    ),
+                }
+
+            return {
+                "status": "DOMAIN_MISMATCH",
+                "is_flagged": True,
+                "severity": "HIGH",
+                "message": (
+                    f"The claimed organization '{company_name}' does not match "
+                    f"the expected recruiter domain ('{expected_domain}'); "
+                    f"the supplied domain is '@{domain_clean}'."
+                ),
+            }
+
+    company_tokens = [
+        token
+        for token in re.findall(r"[a-z0-9]+", company_clean)
+        if len(token) >= 4
+    ]
+
+    domain_name = domain_clean.split(".")[0]
+
+    if any(token in domain_name for token in company_tokens):
+        return {
+            "status": "PLAUSIBLE_COMPANY_DOMAIN",
+            "is_flagged": False,
+            "severity": "LOW",
+            "message": (
+                f"Domain '@{domain_clean}' is textually consistent with the "
+                f"claimed organization, but SafeApply has not independently "
+                "verified ownership of the domain."
+            ),
+        }
+
     return {
-        "status": "VERIFIED_DOMAIN",
+        "status": "PROFESSIONAL_DOMAIN_UNVERIFIED",
         "is_flagged": False,
         "severity": "LOW",
-        "message": f"Domain '@{domain_clean}' appears consistent with professional corporate communication."
+        "message": (
+            f"Domain '@{domain_clean}' is not a free email provider, but "
+            "SafeApply has not independently verified that it belongs to "
+            f"'{company_name}'."
+        ),
     }
 
 
