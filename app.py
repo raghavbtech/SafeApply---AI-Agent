@@ -231,7 +231,7 @@ with st.sidebar:
         """
         - 📬 **Mail Ingestion & Screening**
         - 🛡️ **4-Pillar Threat Detection**
-        - 🚫 **1-Click Spam Quarantine**
+        - ️ **Add to SafeApply Quarantine**
         - 🎯 **Candidate Profile Matching**
         - ✍️ **Tailored Cover Letter Gen**
         - 🚀 **1-Click Application Workflow**
@@ -247,7 +247,7 @@ with st.sidebar:
     st.caption(f"Skills: {', '.join(profile.get('skills', [])[:4])}...")
 
     st.divider()
-    st.caption("Responsible AI: SafeApply requires human confirmation before moving emails or sending applications.")
+    st.caption("Responsible AI: SafeApply requires human confirmation before quarantining offers or recording applications.")
 
 
 # =========================================================
@@ -608,7 +608,7 @@ with tab_mail:
                 # AUTONOMOUS WORKFLOW ACTION ENGINES
                 # =========================================================
 
-                # PATH A: HIGH / CRITICAL RISK -> QUARANTINE & SPAM
+                # PATH A: HIGH / CRITICAL RISK -> SAFEAPPLY QUARANTINE
                 if risk_level in ("High", "Critical") and sel_email.get("status") != "quarantined":
                     st.markdown("### 🚨 High Risk Alert — Security Action Required")
                     st.warning(
@@ -626,13 +626,15 @@ with tab_mail:
                     with q_c2:
                         st.write("")
                         st.write("")
-                        if st.button("🛡️ Move to Spam & Quarantine", type="primary", use_container_width=True):
+                        if st.button("🛡️ Add to SafeApply Quarantine", type="primary", use_container_width=True):
                             rec = quarantine_email(sel_email, reason=quarantine_reason)
                             st.success(f"Quarantined! Threat logged to vault with record ID {rec['record_id']}.")
                             st.rerun()
 
+                    st.caption("*(Prototype Quarantine: Isolates this threat in the SafeApply Threat Vault without altering your external mailbox provider)*")
+
                 elif sel_email.get("status") == "quarantined":
-                    st.success("🛡️ This email has been moved to Spam & Quarantine. It is safely isolated in the Threat Vault.")
+                    st.success("🛡️ This email has been added to SafeApply Quarantine. It is safely isolated in the Threat Vault.")
 
                 # PATH B: LOW RISK -> JOB APPLICATION AGENT
                 elif risk_level == "Low":
