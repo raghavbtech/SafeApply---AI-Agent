@@ -27,7 +27,7 @@ import json
 import hashlib
 import threading
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from dotenv import load_dotenv
 
@@ -104,13 +104,19 @@ def _get_container(name: str):
             return _containers[name]
         try:
             from azure.cosmos import CosmosClient, PartitionKey
+            from azure.cosmos.exceptions import CosmosResourceNotFoundError
 
             client = CosmosClient(COSMOS_ENDPOINT, credential=COSMOS_KEY)
-            database = client.create_database_if_not_exists(id=COSMOS_DATABASE)
-            container = database.create_container_if_not_exists(
-                id=name,
-                partition_key=PartitionKey(path="/user_id"),
-            )
+            database = client.get_database_client(COSMOS_DATABASE)
+            container = database.get_container_client(name)
+            try:
+                container.read()
+            except CosmosResourceNotFoundError:
+                database = client.create_database_if_not_exists(id=COSMOS_DATABASE)
+                container = database.create_container_if_not_exists(
+                    id=name,
+                    partition_key=PartitionKey(path="/user_id"),
+                )
             _containers[name] = container
             return container
         except Exception as exc:  # noqa: BLE001 - we intentionally degrade gracefully
@@ -310,6 +316,41 @@ def db_fetch_all_emails(
     if status:
         rows = [r for r in rows if r.get("status") == status]
     return sorted(rows, key=lambda r: r.get("synced_at", ""), reverse=True)
+
+
+def db_get_known_identifiers(user_id: str = DEFAULT_USER_ID) -> Tuple[Set[str], Set[str]]:
+    """
+    Return sets of (known_imap_uids, known_message_ids) for this user.
+    Enables O(1) deduplication check so already-stored emails are never re-downloaded.
+    """
+    known_uids: Set[str] = set()
+    known_msg_ids: Set[str] = set()
+
+    container = _get_container(COSMOS_EMAIL_CONTAINER)
+    if container is not None:
+        try:
+            items = container.query_items(
+                query="SELECT c.imap_uid, c.message_id FROM c WHERE c.doc_type = 'email'",
+                partition_key=user_id,
+            )
+            for item in items:
+                uid = item.get("imap_uid")
+                if uid:
+                    known_uids.add(str(uid).strip())
+                msg_id = item.get("message_id")
+                if msg_id:
+                    known_msg_ids.add(str(msg_id).strip())
+            return known_uids, known_msg_ids
+        except Exception as exc:  # noqa: BLE001
+            print(f"[azure_db] known-identifiers query failed: {exc}")
+
+    for r in _local_query("emails", user_id):
+        if r.get("imap_uid"):
+            known_uids.add(str(r["imap_uid"]).strip())
+        if r.get("message_id"):
+            known_msg_ids.add(str(r["message_id"]).strip())
+
+    return known_uids, known_msg_ids
 
 
 def db_update_email_fields(

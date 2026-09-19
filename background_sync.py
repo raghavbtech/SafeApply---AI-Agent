@@ -15,13 +15,19 @@ from mail_sync import sync_mailbox_to_db, is_mail_configured
 from auto_scan import scan_all_unscanned
 from azure_db import DEFAULT_USER_ID, db_set_state
 
-POLL_INTERVAL_SECONDS = int(os.getenv("SAFEAPPLY_POLL_INTERVAL", "300"))  # 5 min default
+POLL_INTERVAL_SECONDS = int(os.getenv("SAFEAPPLY_POLL_INTERVAL", "60"))  # 60s default
 
 _poller_started = False
 _lock = threading.Lock()
 
 
+def is_background_sync_running() -> bool:
+    """Check if the background poller daemon is currently active."""
+    return _poller_started
+
+
 def _poll_loop(user_id: str):
+    print(f"[background_sync] Poller daemon active for {user_id} (interval: {POLL_INTERVAL_SECONDS}s).")
     while True:
         try:
             if is_mail_configured():
@@ -32,7 +38,11 @@ def _poll_loop(user_id: str):
                 }, user_id=user_id)
 
                 if result.get("ok"):
-                    scan_all_unscanned(user_id=user_id)
+                    # Scan any newly stored or unscanned emails
+                    unscanned_results = scan_all_unscanned(user_id=user_id)
+                    if unscanned_results:
+                        quarantined = sum(1 for r in unscanned_results if r.get("quarantined"))
+                        print(f"[background_sync] Auto-scanned {len(unscanned_results)} emails (quarantined: {quarantined}).")
         except Exception as exc:  # noqa: BLE001
             print(f"[background_sync] poll error: {exc}")
 
@@ -45,6 +55,6 @@ def start_background_sync(user_id: str = DEFAULT_USER_ID):
     with _lock:
         if _poller_started:
             return
-        thread = threading.Thread(target=_poll_loop, args=(user_id,), daemon=True)
+        thread = threading.Thread(target=_poll_loop, args=(user_id,), daemon=True, name="SafeApply-SyncPoller")
         thread.start()
         _poller_started = True

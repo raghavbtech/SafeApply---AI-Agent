@@ -18,6 +18,10 @@ import streamlit as st
 import ui_mailbox
 importlib.reload(ui_mailbox)
 from ui_mailbox import render_inbox_view, render_spam_view, render_sidebar_status
+from background_sync import start_background_sync
+
+# Automatically run background email fetcher daemon without requiring manual clicks
+start_background_sync()
 from agent import (
     analyze_job_offer,
     is_azure_openai_configured,

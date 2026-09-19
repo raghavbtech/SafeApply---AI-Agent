@@ -15,7 +15,12 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 
 from agent import analyze_job_offer
-from azure_db import db_save_emails, db_fetch_all_emails, db_update_email_status
+from azure_db import (
+    db_save_emails,
+    db_fetch_all_emails,
+    db_update_email_status,
+    db_get_known_identifiers,
+)
 
 
 # =========================================================
@@ -124,6 +129,45 @@ def is_recruitment_email(subject: str, body: str, sender: str = "") -> bool:
     # Require score of at least 2 for genuine recruitment classification
     threshold = 4 if has_non_recruitment else 2
     return score >= threshold
+
+
+def is_header_definitely_non_recruitment(subject: str, sender: str) -> bool:
+    """
+    Fast pre-filter based strictly on Subject and Sender headers.
+    Returns True ONLY for emails that are definitively non-recruitment (OTPs, shopping,
+    delivery, bank alerts, subscriptions) AND contain zero recruitment signals.
+    """
+    sub_lower = (subject or "").lower()
+    snd_lower = (sender or "").lower()
+    text = f"{sub_lower} {snd_lower}"
+
+    # Recruitment keywords - if ANY of these match, NEVER reject at header stage
+    rec_patterns = [
+        r"\bjob\b", r"\boffer\b", r"\bintern\b", r"\binternship\b",
+        r"\brecruit", r"\bhiring\b", r"\bselection\b", r"\bcandidat",
+        r"\bstipend\b", r"\bcareer", r"\bplacement\b", r"\binterview\b",
+        r"\bopening\b", r"\bposition\b", r"\bengineer\b", r"\bdeveloper\b",
+        r"\bshortlist", r"\bapplied\b", r"\bapplication\b", r"\bwork from home\b",
+        r"\bglassdoor\b", r"\blinkedin\b", r"\bnaukri\b", r"\bindeed\b", r"\bunstop\b",
+        r"\bwellfound\b", r"\bhirist\b", r"\binstahyre\b",
+    ]
+    if any(re.search(p, text) for p in rec_patterns):
+        return False
+
+    # Definite non-recruitment indicators
+    non_rec_patterns = [
+        r"\bwallet credit\b", r"\bcashback\b", r"\bdiscount\b", r"\bsale\b",
+        r"\border placed\b", r"\border confirmation\b", r"\bdelivered\b",
+        r"\btracking\b", r"\bshipment\b", r"\binvoice\b", r"\breceipt\b",
+        r"\bverification code\b", r"\bone-time password\b", r"\botp\b",
+        r"\bsecurity alert\b", r"\bsign-in\b", r"\bpassword reset\b",
+        r"\bfinish setting up\b", r"\bbill due\b", r"\bstatement\b",
+        r"\bnewsletter\b", r"\bweekly digest\b", r"\bunsubscribe\b",
+        r"\bdependabot\b", r"\bpromotional discount\b", r"\bpayment successful\b",
+        r"tatacliq\.com", r"swiggy\.in", r"zomato\.com", r"flipkart\.com",
+        r"myntra\.com", r"uber\.com", r"ola\.com", r"netflix\.com",
+    ]
+    return any(re.search(p, text) for p in non_rec_patterns)
 
 
 # =========================================================
@@ -507,40 +551,90 @@ def fetch_live_emails(
 
         mail.select("INBOX", readonly=True)
 
-        status, messages = mail.search(None, "ALL")
+        status, messages = mail.uid("SEARCH", None, "ALL")
         if status != "OK" or not messages[0]:
             return []
 
-        msg_ids = messages[0].split()
-        # Scan across a larger window of recent messages to find recruitment emails
-        window_size = min(len(msg_ids), max(max_emails * 4, 35))
-        recent_ids = msg_ids[-window_size:]
-        recent_ids.reverse()
+        all_uids = messages[0].split()
+        window_size = min(len(all_uids), max(max_emails * 3, 40))
+        recent_uids = all_uids[-window_size:]
+        recent_uids.reverse()
 
-        fetched_emails = []
-        for mid in recent_ids:
-            if len(fetched_emails) >= max_emails:
-                break
+        uid_strs = [u.decode() if isinstance(u, bytes) else str(u) for u in recent_uids]
 
-            try:
-                res_status, msg_data = mail.fetch(mid, "(RFC822)")
-                if res_status != "OK" or not msg_data:
-                    continue
+        # Check known IDs in Cosmos DB to skip already-stored emails
+        try:
+            known_uids, known_msg_ids = db_get_known_identifiers()
+        except Exception:
+            known_uids, known_msg_ids = set(), set()
 
-                raw_email = msg_data[0][1]
-                if isinstance(raw_email, bytes):
-                    parsed = parse_eml_content(raw_email)
-
-                    # STRICT FILTER: Only accept job/recruitment emails, ignore everything else
-                    if not parsed.get("is_recruitment", False):
-                        continue
-
-                    parsed["id"] = f"LIVE-{mid.decode() if isinstance(mid, bytes) else str(mid)}"
-                    fetched_emails.append(parsed)
-            except Exception:
+        # Tier 1: Fast batch header inspection
+        candidate_uids = []
+        chunk_size = 30
+        for i in range(0, len(uid_strs), chunk_size):
+            chunk = uid_strs[i:i + chunk_size]
+            typ, res = mail.uid("FETCH", ",".join(chunk), "(UID BODY.PEEK[HEADER.FIELDS (SUBJECT FROM DATE MESSAGE-ID)])")
+            if typ != "OK" or not res:
                 continue
 
-        # Automatically store fetched recruitment emails in database for instant access (Flaw 18, 19)
+            for item in res:
+                if isinstance(item, tuple) and len(item) > 1:
+                    meta = item[0].decode(errors="replace") if isinstance(item[0], bytes) else str(item[0])
+                    uid_match = re.search(r"UID\s+(\d+)", meta)
+                    if not uid_match:
+                        continue
+                    uid = uid_match.group(1)
+
+                    raw_hdr = item[1]
+                    msg = email_pkg.message_from_bytes(raw_hdr) if isinstance(raw_hdr, bytes) else email_pkg.message_from_string(str(raw_hdr))
+                    subj = _decode_mime_header(msg.get("Subject", ""))
+                    sender = _decode_mime_header(msg.get("From", ""))
+                    msg_id = (msg.get("Message-ID", "") or "").strip()
+
+                    if uid in known_uids or (msg_id and msg_id in known_msg_ids):
+                        continue
+                    if is_header_definitely_non_recruitment(subj, sender):
+                        continue
+
+                    candidate_uids.append(uid)
+                    if len(candidate_uids) >= max_emails * 2:
+                        break
+
+            if len(candidate_uids) >= max_emails * 2:
+                break
+
+        # Tier 2: Targeted batch fetch for candidate bodies
+        fetched_emails = []
+        if candidate_uids:
+            c_chunk_size = 15
+            for i in range(0, len(candidate_uids), c_chunk_size):
+                if len(fetched_emails) >= max_emails:
+                    break
+                c_chunk = candidate_uids[i:i + c_chunk_size]
+                typ, res = mail.uid("FETCH", ",".join(c_chunk), "(UID BODY.PEEK[])")
+                if typ != "OK" or not res:
+                    continue
+
+                for item in res:
+                    if isinstance(item, tuple) and len(item) > 1:
+                        meta = item[0].decode(errors="replace") if isinstance(item[0], bytes) else str(item[0])
+                        uid_match = re.search(r"UID\s+(\d+)", meta)
+                        uid = uid_match.group(1) if uid_match else ""
+                        raw_email = item[1]
+                        if not isinstance(raw_email, (bytes, bytearray)):
+                            continue
+
+                        parsed = parse_eml_content(bytes(raw_email))
+                        if not parsed.get("is_recruitment", False):
+                            continue
+
+                        parsed["id"] = f"LIVE-{uid}"
+                        parsed["imap_uid"] = str(uid)
+                        fetched_emails.append(parsed)
+                        if len(fetched_emails) >= max_emails:
+                            break
+
+        # Automatically store fetched recruitment emails in database for instant access
         if fetched_emails:
             try:
                 db_save_emails(fetched_emails)

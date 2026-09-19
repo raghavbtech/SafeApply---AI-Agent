@@ -346,7 +346,7 @@ def generate_application_package(
             from openai import OpenAI
 
             base_url = endpoint if endpoint.endswith("/models") else f"{endpoint}/models"
-            client = OpenAI(base_url=base_url, api_key=api_key, timeout=12.0)
+            client = OpenAI(base_url=base_url, api_key=api_key, timeout=5.0)
 
             prompt = f"""You are a senior career writer. Draft an email application package for candidate '{cand_name}' applying for the role '{role}' at '{company}'.
 
@@ -386,7 +386,12 @@ Return ONLY JSON, no markdown fences.
             if content.startswith("```"):
                 content = re.sub(r"^```(?:json)?\s*", "", content)
                 content = re.sub(r"\s*```$", "", content)
-            parsed = json.loads(content)
+            try:
+                parsed = json.loads(content, strict=False)
+            except Exception:
+                # Attempt to fix raw unescaped newlines in json strings
+                fixed_content = re.sub(r'(?<!\\)\n', r'\\n', content)
+                parsed = json.loads(fixed_content, strict=False)
             cover_letter = parsed.get("cover_letter")
             gen_reply = parsed.get("recruiter_reply")
 
@@ -572,7 +577,14 @@ def revert_back_to_recruiter(
     sent_via_smtp = False
     has_attached = False
 
-    if smtp_server and smtp_user and smtp_pass:
+    is_mock = any(
+        target_email.lower().endswith(dom)
+        for dom in ("@example.com", "@test.com", "@safeapply.local", "@placeholder.com")
+    ) or target_email.lower() in ("talent@google.com", "recruiting@microsoft.com", "hr@company.com", "unknown")
+
+    enable_live_smtp = os.getenv("ENABLE_REAL_SMTP_DISPATCH", "false").lower() == "true"
+
+    if enable_live_smtp and smtp_server and smtp_user and smtp_pass and not is_mock:
         try:
             import smtplib
             from email.mime.text import MIMEText
@@ -594,12 +606,12 @@ def revert_back_to_recruiter(
                 has_attached = True
 
             try:
-                with smtplib.SMTP_SSL(smtp_server, 465, timeout=12) as server:
+                with smtplib.SMTP_SSL(smtp_server, 465, timeout=10) as server:
                     server.login(smtp_user, smtp_pass)
                     server.sendmail(smtp_user, [target_email], msg.as_string())
                 sent_via_smtp = True
             except Exception:
-                with smtplib.SMTP(smtp_server, 587, timeout=12) as server:
+                with smtplib.SMTP(smtp_server, 587, timeout=10) as server:
                     server.starttls()
                     server.login(smtp_user, smtp_pass)
                     server.sendmail(smtp_user, [target_email], msg.as_string())
@@ -615,7 +627,7 @@ def revert_back_to_recruiter(
         f"Automated revert-back email expressing interest dispatched to recruiter ({target_email}) "
         f"from candidate ({candidate_email})."
         + (f" Attached candidate resume: '{resume_filename or 'resume'}'." if has_attached else "")
-        + (" (Sent via SMTP)" if sent_via_smtp else "")
+        + (" (Sent via SMTP)" if sent_via_smtp else (" (Simulated/Demo)" if is_mock else ""))
     )
 
     return {

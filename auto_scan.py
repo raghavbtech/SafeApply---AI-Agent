@@ -46,11 +46,19 @@ from mail_sync import (
     open_imap,
 )
 
+from job_agent import (
+    extract_job_spec,
+    generate_application_package,
+    submit_application,
+    load_candidate_profile,
+)
+
 load_dotenv()
 
 
 AUTO_QUARANTINE_ENABLED = os.getenv("AUTO_QUARANTINE_ENABLED", "true").lower() == "true"
 AUTO_QUARANTINE_THRESHOLD = int(os.getenv("AUTO_QUARANTINE_THRESHOLD", "65"))
+AUTO_APPLY_ENABLED = os.getenv("AUTO_APPLY_ENABLED", "true").lower() == "true"
 
 # Risk levels that trigger the quarantine path when auto-quarantine is on.
 QUARANTINE_LEVELS = {"High", "Critical"}
@@ -250,10 +258,91 @@ def restore_from_spam(doc_id: str, user_id: str = DEFAULT_USER_ID) -> Dict[str, 
 # SCAN + ROUTE
 # =========================================================
 
+def apply_to_email(doc_id: str, user_id: str = DEFAULT_USER_ID) -> Dict[str, Any]:
+    """
+    Automatically prepares application package, attaches resume, reverts back
+    to recruiter, and updates email state to 'applied' in Azure Cosmos DB.
+    """
+    email = db_fetch_email(doc_id, user_id)
+    if not email:
+        return {"ok": False, "error": "Email not found."}
+
+    try:
+        profile = load_candidate_profile()
+        job_spec = extract_job_spec(email.get("body", ""), email)
+        app_pkg = generate_application_package(job_spec, profile)
+        sub_rec = submit_application(
+            email_id=doc_id,
+            job_spec=job_spec,
+            application_package={
+                "cover_letter": app_pkg.get("cover_letter", ""),
+                "recruiter_reply": app_pkg.get("recruiter_reply", ""),
+            },
+            candidate_profile=profile,
+            email_data=email,
+        )
+
+        db_update_email_fields(
+            doc_id,
+            {
+                "status": "applied",
+                "user_decision": "applied",
+                "applied_at": _utcnow(),
+                "submission_id": sub_rec.get("submission_id"),
+                "application_package": {
+                    "cover_letter": app_pkg.get("cover_letter", ""),
+                    "recruiter_reply": app_pkg.get("recruiter_reply", ""),
+                },
+            },
+            user_id=user_id,
+        )
+
+        db_write_audit(
+            action="auto_apply",
+            email_doc_id=doc_id,
+            details={
+                "company_name": job_spec.get("company_name"),
+                "role_title": job_spec.get("role_title"),
+                "submission_id": sub_rec.get("submission_id"),
+                "dispatch_status": sub_rec.get("status"),
+            },
+            user_id=user_id,
+        )
+
+        return {
+            "ok": True,
+            "submission_id": sub_rec.get("submission_id"),
+            "company_name": job_spec.get("company_name"),
+            "role_title": job_spec.get("role_title"),
+            "dispatch_status": sub_rec.get("status"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        print(f"[auto_scan] Auto-apply failed for {doc_id}: {exc}")
+        return {"ok": False, "error": str(exc)}
+
+
+def auto_apply_all_low_risk(user_id: str = DEFAULT_USER_ID) -> List[Dict[str, Any]]:
+    """
+    Finds all existing Low risk recruitment emails in Cosmos DB that have not
+    yet been applied to, and automatically executes application packages for them.
+    """
+    emails = db_fetch_all_emails(user_id, folder="inbox")
+    low_unapplied = [
+        e for e in emails
+        if e.get("risk_level") == "Low" and e.get("user_decision") != "applied" and e.get("status") != "applied"
+    ]
+    results = []
+    for email in low_unapplied:
+        res = apply_to_email(email["id"], user_id=user_id)
+        results.append(res)
+    return results
+
+
 def scan_and_route_email(
     doc_id: str,
     user_id: str = DEFAULT_USER_ID,
     allow_auto_quarantine: Optional[bool] = None,
+    allow_auto_apply: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Analyse one stored email, persist the verdict, and route it."""
     email = db_fetch_email(doc_id, user_id)
@@ -323,12 +412,25 @@ def scan_and_route_email(
         result = move_to_spam(doc_id, reason, user_id, automated=True)
         quarantined = result.get("ok", False)
 
+    # Auto-apply if risk level is Low and not quarantined
+    applied = False
+    submission_id = None
+    auto_apply = AUTO_APPLY_ENABLED if allow_auto_apply is None else allow_auto_apply
+
+    if risk_level == "Low" and auto_apply and not quarantined:
+        apply_res = apply_to_email(doc_id, user_id=user_id)
+        if apply_res.get("ok"):
+            applied = True
+            submission_id = apply_res.get("submission_id")
+
     return {
         "ok": True,
         "doc_id": doc_id,
         "risk_level": risk_level,
         "risk_score": risk_score,
         "quarantined": quarantined,
+        "applied": applied,
+        "submission_id": submission_id,
         "subject": email.get("subject"),
     }
 
@@ -338,6 +440,7 @@ def scan_all_unscanned(
     limit: int = 50,
     progress: Optional[Callable[[int, int, Dict[str, Any]], None]] = None,
     allow_auto_quarantine: Optional[bool] = None,
+    allow_auto_apply: Optional[bool] = None,
 ) -> List[Dict[str, Any]]:
     """
     Scan every unscanned recruitment email for this user.
@@ -355,7 +458,10 @@ def scan_all_unscanned(
 
     for index, email in enumerate(pending):
         result = scan_and_route_email(
-            email["id"], user_id, allow_auto_quarantine=allow_auto_quarantine
+            email["id"],
+            user_id,
+            allow_auto_quarantine=allow_auto_quarantine,
+            allow_auto_apply=allow_auto_apply,
         )
         results.append(result)
         if progress:

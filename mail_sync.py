@@ -34,6 +34,7 @@ from dotenv import load_dotenv
 
 from mail_agent import (
     is_recruitment_email,
+    is_header_definitely_non_recruitment,
     _decode_mime_header,
     _extract_body_from_email_message,
 )
@@ -42,6 +43,7 @@ from azure_db import (
     db_save_emails,
     db_set_state,
     make_email_doc_id,
+    db_get_known_identifiers,
 )
 
 load_dotenv()
@@ -235,23 +237,24 @@ def parse_message(raw_bytes: bytes, uid: str, provider: str) -> Dict[str, Any]:
 # SYNC
 # =========================================================
 
+
+
+
 def sync_mailbox_to_db(
     max_messages: int = 25,
-    scan_window: int = 120,
+    scan_window: Optional[int] = None,
     user_id: str = DEFAULT_USER_ID,
     credentials: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    Fetch recent INBOX messages, keep the recruitment-related ones, and
-    persist them to Cosmos.
-
-    Args:
-        max_messages: stop after storing this many recruitment emails.
-        scan_window:  how many of the most recent messages to inspect. Most
-                      inboxes are mostly non-recruitment mail, so the window
-                      must be considerably larger than max_messages.
-
-    Returns a summary dict for the UI / worker log.
+    High-performance two-tier mailbox sync:
+    1. Pre-fetches known UIDs / Message-IDs from Azure Cosmos DB so existing messages
+       are skipped with zero extra network transfer.
+    2. Batch-fetches headers (UID BODY.PEEK[HEADER.FIELDS (...)]) in chunks of 30-50,
+       filtering out non-recruitment messages in milliseconds.
+    3. Targeted batch-fetches full content only for candidate recruitment emails using
+       BODY.PEEK[] (preserving unread state in mailbox).
+    4. Persists verified recruitment emails to Cosmos DB.
     """
     creds = credentials or get_mail_credentials()
 
@@ -267,7 +270,12 @@ def sync_mailbox_to_db(
     inspected = recruitment = skipped = 0
     to_store: List[Dict[str, Any]] = []
 
+    window_limit = scan_window if scan_window is not None else max(max_messages * 3, 50)
+
     try:
+        # Pre-fetch known identifiers from Cosmos DB for O(1) deduplication
+        known_uids, known_msg_ids = db_get_known_identifiers(user_id)
+
         mail = open_imap(
             provider=creds["provider"],
             username=creds["username"],
@@ -282,40 +290,82 @@ def sync_mailbox_to_db(
             return {"ok": True, "inspected": 0, "recruitment": 0, "stored": 0,
                     "skipped": 0, "error": ""}
 
-        uids = data[0].split()
-        window = uids[-min(len(uids), scan_window):]
+        all_uids = data[0].split()
+        window = all_uids[-min(len(all_uids), window_limit):]
         window.reverse()  # newest first
+        uid_strs = [u.decode() if isinstance(u, bytes) else str(u) for u in window]
 
-        for uid_bytes in window:
-            if len(to_store) >= max_messages:
+        # Tier 1: Fast batch header inspection in chunks of 30
+        candidate_uids: List[str] = []
+        chunk_size = 30
+
+        for i in range(0, len(uid_strs), chunk_size):
+            chunk = uid_strs[i:i + chunk_size]
+            typ, res = mail.uid("FETCH", ",".join(chunk), "(UID BODY.PEEK[HEADER.FIELDS (SUBJECT FROM DATE MESSAGE-ID)])")
+            if typ != "OK" or not res:
+                continue
+
+            for item in res:
+                if isinstance(item, tuple) and len(item) > 1:
+                    meta = item[0].decode(errors="replace") if isinstance(item[0], bytes) else str(item[0])
+                    uid_match = re.search(r"UID\s+(\d+)", meta)
+                    if not uid_match:
+                        continue
+                    uid = uid_match.group(1)
+                    inspected += 1
+
+                    raw_hdr = item[1]
+                    msg = email_pkg.message_from_bytes(raw_hdr) if isinstance(raw_hdr, bytes) else email_pkg.message_from_string(str(raw_hdr))
+                    subj = _decode_mime_header(msg.get("Subject", ""))
+                    sender = _decode_mime_header(msg.get("From", ""))
+                    msg_id = (msg.get("Message-ID", "") or "").strip()
+
+                    # Deduplication: already in Cosmos DB -> skip body download
+                    if uid in known_uids or (msg_id and msg_id in known_msg_ids):
+                        skipped += 1
+                        continue
+
+                    # Pre-filter: definite non-recruitment -> skip body download
+                    if is_header_definitely_non_recruitment(subj, sender):
+                        skipped += 1
+                        continue
+
+                    candidate_uids.append(uid)
+                    if len(candidate_uids) >= max_messages * 2:
+                        break
+
+            if len(candidate_uids) >= max_messages * 2:
                 break
 
-            uid = uid_bytes.decode() if isinstance(uid_bytes, bytes) else str(uid_bytes)
-            inspected += 1
-
-            try:
-                typ, msg_data = mail.uid("FETCH", uid, "(RFC822)")
-                if typ != "OK" or not msg_data or not msg_data[0]:
+        # Tier 2: Targeted batch fetch for Candidate bodies (chunks of 15)
+        if candidate_uids:
+            c_chunk_size = 15
+            for i in range(0, len(candidate_uids), c_chunk_size):
+                if len(to_store) >= max_messages:
+                    break
+                c_chunk = candidate_uids[i:i + c_chunk_size]
+                typ, res = mail.uid("FETCH", ",".join(c_chunk), "(UID BODY.PEEK[])")
+                if typ != "OK" or not res:
                     continue
 
-                raw = msg_data[0][1]
-                if not isinstance(raw, (bytes, bytearray)):
-                    continue
+                for item in res:
+                    if isinstance(item, tuple) and len(item) > 1:
+                        meta = item[0].decode(errors="replace") if isinstance(item[0], bytes) else str(item[0])
+                        uid_match = re.search(r"UID\s+(\d+)", meta)
+                        uid = uid_match.group(1) if uid_match else ""
+                        raw_bytes = item[1]
+                        if not isinstance(raw_bytes, (bytes, bytearray)):
+                            continue
 
-                doc = parse_message(bytes(raw), uid, creds["provider"])
+                        doc = parse_message(bytes(raw_bytes), uid, creds["provider"])
+                        if not doc["is_recruitment"]:
+                            skipped += 1
+                            continue
 
-                # Only recruitment mail is ever written to Azure. Everything
-                # else is discarded here and never leaves the user's mailbox.
-                if not doc["is_recruitment"]:
-                    skipped += 1
-                    continue
-
-                recruitment += 1
-                to_store.append(doc)
-
-            except Exception as exc:  # noqa: BLE001
-                print(f"[mail_sync] could not read UID {uid}: {exc}")
-                continue
+                        recruitment += 1
+                        to_store.append(doc)
+                        if len(to_store) >= max_messages:
+                            break
 
         stored = db_save_emails(to_store, user_id=user_id) if to_store else 0
 
