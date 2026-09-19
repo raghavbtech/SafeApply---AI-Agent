@@ -64,6 +64,19 @@ Visitor Opens Site ➔ Server issues anonymous HTTP-only cookie ➔ Immediate ac
 
 ---
 
+## 🧭 Streamlined Candidate Navigation (6 Primary Destinations)
+
+SafeApply consolidates its full security and application suite into **exactly six understandable primary destinations**:
+
+1. **Dashboard** (`/dashboard`): Real-time threat status, advisory risk distribution, 4 candidate shortcuts (**Scan Job Offer**, **Upload Resume**, **My Mailbox**, **Job Applications**), recent recruitment emails, and candidate session privacy status.
+2. **Scan Job Offer** (`/scan`): Unified text paste and `.eml` analysis flow with the 4-pillar detection pipeline, benchmark presets, and contextual next-step advice.
+3. **My Mailbox** (`/inbox`): Unified Active Inbox, Quarantined Threats vault tab (with Restore to Inbox and Quarantine audit tracking), and contextual interactive Verification Checklist for ambiguous offers (with Verify & Trust Offer override).
+4. **Job Applications** (`/applications`): Combined Opportunities (job extraction & skill overlap), Prepare Application (tailored drafts, cover letters, recruiter replies, and explicit Human-in-the-Loop approval modal), and History (submission tracking).
+5. **My Profile** (`/profile`): High-contrast, Poppins-styled candidate details, education, skill badges, target locations, and resume management.
+6. **Settings** (`/settings`): Remote mailbox credentials connection/disconnection, autonomous quarantine and auto-apply thresholds, live SMTP dispatch toggle, and "Delete All My Session Data" privacy controls.
+
+---
+
 ## 🏛️ 4-Pillar Detection Architecture
 
 SafeApply unifies four complementary analytical layers to assess any recruitment communication:

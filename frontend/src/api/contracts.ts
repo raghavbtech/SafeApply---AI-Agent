@@ -65,6 +65,7 @@ export interface EmailDetailResponse extends EmailListItem {
   user_override?: string | null;
   application_package?: any;
   submission_id?: string | null;
+  review_status?: string | null;
 }
 
 export interface ToolOutputsResponse {

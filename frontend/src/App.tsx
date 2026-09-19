@@ -5,18 +5,14 @@ import { AuthProvider } from './auth/AuthProvider';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { AppShell } from './layouts/AppShell';
 
-// Page Imports
+// Primary 6 Destinations & Utilities
 import { Landing } from './pages/Landing';
 import { Dashboard } from './pages/Dashboard';
-import { Inbox } from './pages/Inbox';
 import { ManualScan } from './pages/ManualScan';
-import { Spam } from './pages/Spam';
-import { Verification } from './pages/Verification';
-import { JobAgent } from './pages/JobAgent';
+import { Inbox } from './pages/Inbox';
 import { Applications } from './pages/Applications';
 import { Profile } from './pages/Profile';
 import { Settings } from './pages/Settings';
-import { Audit } from './pages/Audit';
 import { Analysis } from './pages/Analysis';
 import { NotFound } from './pages/NotFound';
 
@@ -39,7 +35,7 @@ export const App: React.FC = () => {
             {/* Public Landing Page */}
             <Route path="/" element={<Landing />} />
 
-            {/* Authenticated Application Shell */}
+            {/* Account-Free Candidate Portal App Shell */}
             <Route
               element={
                 <ProtectedRoute>
@@ -47,19 +43,24 @@ export const App: React.FC = () => {
                 </ProtectedRoute>
               }
             >
+              {/* Primary 6 Destinations */}
               <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/inbox" element={<Inbox />} />
               <Route path="/scan" element={<ManualScan />} />
-              <Route path="/quarantine" element={<Spam />} />
-              <Route path="/spam" element={<Spam />} />
-              <Route path="/verification" element={<Verification />} />
-              <Route path="/job-agent" element={<JobAgent />} />
-              <Route path="/jobs" element={<JobAgent />} />
+              <Route path="/inbox" element={<Inbox />} />
               <Route path="/applications" element={<Applications />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/settings" element={<Settings />} />
-              <Route path="/audit" element={<Audit />} />
+
+              {/* In-depth Analysis View */}
               <Route path="/analysis" element={<Analysis />} />
+
+              {/* Backward Compatibility Redirects */}
+              <Route path="/quarantine" element={<Navigate to="/inbox?tab=quarantine" replace />} />
+              <Route path="/spam" element={<Navigate to="/inbox?tab=quarantine" replace />} />
+              <Route path="/verification" element={<Navigate to="/inbox?tab=inbox" replace />} />
+              <Route path="/job-agent" element={<Navigate to="/applications?tab=opportunities" replace />} />
+              <Route path="/jobs" element={<Navigate to="/applications?tab=opportunities" replace />} />
+              <Route path="/audit" element={<Navigate to="/dashboard" replace />} />
             </Route>
 
             {/* Catch-all 404 Route */}

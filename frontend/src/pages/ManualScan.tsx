@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import {
   FileScan,
@@ -12,6 +13,9 @@ import {
   AlertTriangle,
   Cpu,
   Layers,
+  Briefcase,
+  ArrowRight,
+  Shield,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { RiskBadge } from '../components/RiskBadge';
@@ -49,6 +53,7 @@ Email: karan.apexmedia@gmail.com`,
 };
 
 export const ManualScan: React.FC = () => {
+  const navigate = useNavigate();
   const [activeMode, setActiveMode] = useState<'text' | 'eml'>('text');
   const [selectedPreset, setSelectedPreset] = useState<string>('Select a preset sample...');
   const [offerText, setOfferText] = useState<string>('');
@@ -88,9 +93,9 @@ export const ManualScan: React.FC = () => {
     <div className="mx-auto max-w-5xl space-y-8">
       {/* Header */}
       <div>
-        <h2 className="font-heading text-xl font-extrabold text-white">Ad-Hoc Offer & EML Analyzer</h2>
+        <h2 className="font-heading text-xl font-extrabold text-white">Scan Job Offer</h2>
         <p className="text-xs text-slate-400">
-          Paste any placement letter, WhatsApp offer, or upload an exported .eml file to run the 4-pillar detection pipeline.
+          Paste any placement letter, WhatsApp offer, or upload an exported .eml file to run the multi-pillar detection pipeline.
         </p>
       </div>
 
@@ -248,6 +253,44 @@ export const ManualScan: React.FC = () => {
                   </div>
                 </div>
               </div>
+
+              {/* Contextual Next Steps */}
+              <div className="flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-slate-800">
+                <div className="text-xs text-slate-400">
+                  {analysis.risk_level === 'High' || analysis.risk_level === 'Critical' ? (
+                    <span className="text-rose-400 font-semibold">
+                      ⚠️ Critical threat indicators detected. Avoid contacting this sender or sharing confidential details.
+                    </span>
+                  ) : analysis.risk_level === 'Medium' ? (
+                    <span className="text-amber-400 font-semibold">
+                      ℹ️ Ambiguous indicators detected. We recommend cross-referencing contact info in My Mailbox.
+                    </span>
+                  ) : (
+                    <span className="text-emerald-400 font-semibold">
+                      ✓ Offer verified as low-risk. You can prepare and tailor your application package.
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => navigate('/inbox')}
+                    className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-dark-850 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-dark-800 transition"
+                  >
+                    <span>Open My Mailbox</span>
+                  </button>
+                  {analysis.risk_level === 'Low' && (
+                    <button
+                      onClick={() => navigate('/applications?tab=opportunities')}
+                      className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-4 py-2 text-xs font-bold text-white shadow-neon-emerald transition hover:opacity-95"
+                    >
+                      <Briefcase className="h-3.5 w-3.5" />
+                      <span>Prepare Application</span>
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           ) : null}
         </div>
@@ -283,7 +326,7 @@ export const ManualScan: React.FC = () => {
           </form>
 
           {emlMutation.data && (
-            <div className="mt-6 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 max-w-md mx-auto text-xs space-y-2">
+            <div className="mt-6 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 max-w-md mx-auto text-xs space-y-3">
               <div className="flex items-center gap-2 text-emerald-400 font-bold">
                 <CheckCircle2 className="h-4 w-4" /> EML Ingested Successfully!
               </div>
@@ -292,6 +335,13 @@ export const ManualScan: React.FC = () => {
               <p className="text-slate-400">
                 Recruitment classified: {emlMutation.data.is_recruitment ? '✅ Yes' : '❌ Non-recruitment'}
               </p>
+              <button
+                onClick={() => navigate('/inbox')}
+                className="mt-2 w-full flex items-center justify-center gap-1.5 rounded-lg bg-emerald-500/20 border border-emerald-500/40 py-2 text-xs font-bold text-emerald-300 hover:bg-emerald-500/30 transition"
+              >
+                <span>View in My Mailbox</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </button>
             </div>
           )}
         </div>

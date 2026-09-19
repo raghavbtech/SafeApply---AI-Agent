@@ -16,7 +16,10 @@ import {
   AlertTriangle,
   Info,
   Save,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Trash2,
+  AlertCircle,
+  X,
 } from 'lucide-react';
 
 export const Settings: React.FC = () => {
@@ -33,9 +36,26 @@ export const Settings: React.FC = () => {
   const [syncBatchSize, setSyncBatchSize] = useState<number>(15);
   const [bannerMsg, setBannerMsg] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
   const [showConnectForm, setShowConnectForm] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [connEmail, setConnEmail] = useState('');
   const [connPass, setConnPass] = useState('');
   const [connServer, setConnServer] = useState('imap.gmail.com');
+
+  // Purge Session Data Mutation
+  const purgeMutation = useMutation({
+    mutationFn: () => api.purgeSessionData(),
+    onSuccess: () => {
+      queryClient.clear();
+      setBannerMsg({ type: 'success', text: 'All candidate data and session records have been deleted.' });
+      setShowDeleteModal(false);
+      setTimeout(() => {
+        window.location.href = '/dashboard';
+      }, 1500);
+    },
+    onError: (err: any) => {
+      setBannerMsg({ type: 'error', text: `Failed to delete session data: ${err.message || 'Unknown error'}` });
+    },
+  });
 
   // Fetch Mailbox Status
   const { data: mailboxStatus, isLoading: isMailboxLoading } = useQuery<MailboxConnectionStatus>({
@@ -424,6 +444,79 @@ export const Settings: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Candidate Privacy & Data Sovereignty Section */}
+      <div className="rounded-2xl border border-rose-500/20 bg-dark-900/60 p-6 backdrop-blur-xl space-y-4">
+        <div className="flex items-start justify-between">
+          <div className="space-y-1">
+            <h3 className="font-heading text-sm font-bold text-white flex items-center gap-2">
+              <Lock className="h-4 w-4 text-rose-400" />
+              Candidate Privacy & Data Sovereignty
+            </h3>
+            <p className="text-xs text-slate-400 max-w-2xl leading-relaxed">
+              SafeApply operates entirely account-free. All candidate profile details, analyzed emails, uploaded resumes,
+              and prepared drafts are partitioned strictly to your anonymous session cookie. You maintain complete control to purge your data at any time.
+            </p>
+          </div>
+        </div>
+
+        <div className="pt-3 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="text-2xs text-slate-400">
+            Clicking delete will purge your candidate profile, parsed resumes, scanned emails, and prepared applications.
+          </div>
+          <button
+            onClick={() => setShowDeleteModal(true)}
+            className="flex items-center justify-center gap-2 rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2.5 text-xs font-bold text-rose-300 hover:bg-rose-500/20 transition shrink-0"
+          >
+            <Trash2 className="h-4 w-4" />
+            <span>Delete All My Session Data</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+          <div className="w-full max-w-md rounded-2xl border border-rose-500/40 bg-dark-900 p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2 text-rose-400">
+                <AlertCircle className="h-5 w-5" />
+                <h3 className="font-heading text-sm font-bold text-white">Permanently Delete All Data?</h3>
+              </div>
+              <button
+                onClick={() => setShowDeleteModal(false)}
+                className="text-slate-400 hover:text-white transition"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              This action will permanently delete your candidate profile, uploaded resumes, scanned emails,
+              quarantined messages, and application records associated with this session. This action cannot be undone.
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowDeleteModal(false)}
+                className="rounded-xl border border-slate-700 bg-dark-850 px-4 py-2 text-xs font-medium text-slate-300 hover:bg-dark-800 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={purgeMutation.isPending}
+                onClick={() => purgeMutation.mutate()}
+                className="flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white hover:bg-rose-500 transition disabled:opacity-50"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>{purgeMutation.isPending ? 'Deleting...' : 'Yes, Delete Everything'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

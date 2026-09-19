@@ -8,6 +8,7 @@ SafeApply has evolved from a single monolithic Streamlit presentation layer into
    - Dark neon cyberpunk aesthetic with curated cyan/violet/coral tokens.
    - TanStack Query for reactive server state and real-time polling.
    - **Zero Login / Zero Signup**: Direct access to scanner, dashboard, mailbox, quarantine vault, and verification without login walls or demo credential forms.
+   - **Consolidated 6 Primary Destinations**: Dashboard, Scan Job Offer, My Mailbox, Job Applications, My Profile, and Settings with automatic backward-compatibility redirects for legacy routes.
    - **Privacy First**: Header and settings include a prominent "Delete My Data" modal triggering complete server-side data purging.
 2. **Backend**: FastAPI (`/api/v1`) with Pydantic v2 schemas and modular service adapters.
    - **Server-Side Anonymous Sessions**: Issues unpredictable `safeapply_session` HTTP-only cookies on first visit.

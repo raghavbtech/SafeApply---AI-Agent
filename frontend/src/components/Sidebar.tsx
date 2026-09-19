@@ -5,17 +5,9 @@ import {
   LayoutDashboard,
   Inbox,
   FileScan,
-  ShieldAlert,
-  CheckCircle2,
   Briefcase,
-  Send,
-  User,
+  UserCheck,
   Settings,
-  History,
-  Activity,
-  Cpu,
-  Database,
-  Lock,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuth } from '../auth/AuthProvider';
@@ -36,17 +28,14 @@ export const Sidebar: React.FC = () => {
     queryFn: () => api.getProfile(),
   });
 
+  // Exactly six candidate-facing navigation destinations
   const navItems = [
     { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { to: '/inbox', label: 'Mailbox & Scanner', icon: Inbox, count: dashboard?.stats?.inbox },
-    { to: '/scan', label: 'Ad-Hoc & EML Scan', icon: FileScan },
-    { to: '/quarantine', label: 'Threat Quarantine', icon: ShieldAlert, count: dashboard?.stats?.spam, badgeVariant: 'rose' },
-    { to: '/verification', label: 'Ambiguous Verification', icon: CheckCircle2, count: dashboard?.stats?.medium },
-    { to: '/job-agent', label: 'Job Application Agent', icon: Briefcase },
-    { to: '/applications', label: 'Application Tracker', icon: Send, count: dashboard?.total_applications },
-    { to: '/profile', label: 'Candidate Profile', icon: User },
-    { to: '/audit', label: 'Security Audit Chain', icon: History },
-    { to: '/settings', label: 'Settings & Policy', icon: Settings },
+    { to: '/scan', label: 'Scan Job Offer', icon: FileScan },
+    { to: '/inbox', label: 'My Mailbox', icon: Inbox, count: dashboard?.stats?.inbox },
+    { to: '/applications', label: 'Job Applications', icon: Briefcase, count: dashboard?.total_applications },
+    { to: '/profile', label: 'My Profile', icon: UserCheck },
+    { to: '/settings', label: 'Settings', icon: Settings },
   ];
 
   return (
@@ -69,7 +58,7 @@ export const Sidebar: React.FC = () => {
       {/* Main Navigation */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-1">
         <div className="px-3 pb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-          Agent Navigation
+          Candidate Portal
         </div>
         {navItems.map((item) => (
           <NavLink
@@ -89,22 +78,15 @@ export const Sidebar: React.FC = () => {
               <span>{item.label}</span>
             </div>
             {item.count !== undefined && item.count > 0 && (
-              <span
-                className={clsx(
-                  'rounded-full px-2 py-0.5 text-[10px] font-bold',
-                  item.badgeVariant === 'rose'
-                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
-                    : 'bg-dark-800 text-slate-300'
-                )}
-              >
+              <span className="rounded-full bg-dark-800 px-2 py-0.5 text-[10px] font-bold text-slate-300">
                 {item.count}
               </span>
             )}
           </NavLink>
         ))}
 
-        {/* Active Candidate Card */}
-        <div className="mt-6 rounded-xl border border-slate-800 bg-dark-900/60 p-3.5 backdrop-blur-sm">
+        {/* Active Candidate Profile Card */}
+        <div className="mt-8 rounded-xl border border-slate-800 bg-dark-900/60 p-3.5 backdrop-blur-sm">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Active Candidate</span>
             <span className={`h-2 w-2 rounded-full ${profile?.full_name ? 'bg-emerald-500 shadow-neon-emerald' : 'bg-slate-500'}`} />
@@ -113,7 +95,7 @@ export const Sidebar: React.FC = () => {
             {profile?.full_name || 'Anonymous Visitor'}
           </div>
           <div className="text-[11px] text-slate-400 truncate">
-            {profile?.education || (profile?.full_name ? 'Candidate' : 'Profile not set')}
+            {profile?.education || (profile?.full_name ? 'Candidate' : 'Profile not configured')}
           </div>
           <div className="mt-2 flex flex-wrap gap-1">
             {profile?.skills && profile.skills.length > 0 ? (
@@ -127,36 +109,12 @@ export const Sidebar: React.FC = () => {
             )}
           </div>
         </div>
-
-        {/* System Capabilities & Telemetry */}
-        <div className="mt-4 rounded-xl border border-slate-800/80 bg-dark-900/40 p-3 space-y-2 text-[11px]">
-          <div className="flex items-center justify-between text-slate-400">
-            <span className="flex items-center gap-1.5"><Cpu className="h-3.5 w-3.5 text-cyan-400" /> GenAI Layer</span>
-            <span className="text-[10px] font-semibold text-emerald-400">Active</span>
-          </div>
-          <div className="flex items-center justify-between text-slate-400">
-            <span className="flex items-center gap-1.5"><Activity className="h-3.5 w-3.5 text-violet-400" /> EMSCAD ML</span>
-            <span className="text-[10px] font-semibold text-emerald-400">Joblib v1</span>
-          </div>
-          <div className="flex items-center justify-between text-slate-400">
-            <span className="flex items-center gap-1.5"><Database className="h-3.5 w-3.5 text-amber-400" /> Mail Store</span>
-            <span className="text-[10px] text-slate-300 truncate max-w-[90px]">
-              {dashboard?.storage_backend?.split(' ')[0] || 'Cosmos/Local'}
-            </span>
-          </div>
-          <div className="flex items-center justify-between text-slate-400">
-            <span className="flex items-center gap-1.5"><Lock className="h-3.5 w-3.5 text-pink-400" /> Audit Chain</span>
-            <span className="text-[10px] font-semibold text-emerald-400">
-              {dashboard?.audit_chain?.valid ? 'Verified' : 'Checking'}
-            </span>
-          </div>
-        </div>
       </div>
 
       {/* Footer Info */}
       <div className="border-t border-slate-800/80 p-4">
         <p className="text-[10px] text-slate-400 leading-relaxed">
-          <b>Responsible AI:</b> Human-in-the-loop control required before quarantining or sending applications.
+          <b>Responsible AI:</b> Human confirmation required before isolating threats or sending job applications.
         </p>
       </div>
     </aside>
