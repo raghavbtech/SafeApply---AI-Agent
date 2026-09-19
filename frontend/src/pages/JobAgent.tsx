@@ -63,6 +63,12 @@ export const JobAgent: React.FC = () => {
     }
   }, [emailIdParam, candidateEmails, selectedEmailId]);
 
+  // Fetch candidate profile to check completeness
+  const { data: profile } = useQuery({
+    queryKey: ['profile'],
+    queryFn: () => api.getProfile(),
+  });
+
   // Fetch preview for selected email
   const { 
     data: previewData, 
@@ -157,8 +163,27 @@ export const JobAgent: React.FC = () => {
         <div>
           <strong className="text-neon-cyan font-medium">SafeApply Human Oversight Protocol:</strong>{' '}
           The Job Agent will never automatically dispatch applications or contact recruiters without your explicit review and sign-off. Review and modify the tailored draft before final submission.
-        </div>
       </div>
+      </div>
+
+      {(!profile?.full_name || (profile?.skills?.length || 0) < 1) && (
+        <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-300">
+          <div className="flex items-start gap-2.5">
+            <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <strong className="text-amber-300 font-medium">Candidate Profile Not Configured:</strong>{' '}
+              Skill match calculation and tailored cover letter generation require your candidate skills and resume. Add your details in the{' '}
+              <Link to="/profile" className="text-neon-cyan underline font-semibold">Candidate Profile</Link> tab for full AI copilot capabilities.
+            </div>
+          </div>
+          <Link
+            to="/profile"
+            className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-medium text-2xs shrink-0 transition self-start sm:self-auto"
+          >
+            Configure Profile →
+          </Link>
+        </div>
+      )}
 
       {/* Email Selector */}
       <div className="p-4 rounded-xl bg-surface-card border border-border-subtle flex flex-col sm:flex-row sm:items-center justify-between gap-4">

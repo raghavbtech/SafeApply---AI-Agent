@@ -48,3 +48,15 @@ async def download_resume(current_user: UserPrincipal = Depends(get_current_user
         media_type="application/octet-stream",
         filename=os.path.basename(file_path),
     )
+
+
+@router.delete("/resume")
+async def delete_resume(current_user: UserPrincipal = Depends(get_current_user)):
+    deleted = ProfileService.delete_resume(user_id=current_user.user_id)
+    return {"success": True, "deleted": deleted, "message": "Resume deleted successfully."}
+
+
+@router.delete("")
+async def delete_profile(current_user: UserPrincipal = Depends(get_current_user)):
+    ProfileService.delete_profile(user_id=current_user.user_id)
+    return {"success": True, "message": "Candidate profile and resume erased."}

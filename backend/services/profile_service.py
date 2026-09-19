@@ -1,10 +1,13 @@
 """
 Candidate profile and resume management service.
+Enforces file-type validation, size limits, private storage, and data erasure.
 """
 
 import os
+import re
 from datetime import datetime, timezone
 from typing import Optional
+from backend.config import settings
 from backend.errors import NotFoundError, ValidationError
 from backend.schemas.profile import CandidateProfileSchema, ResumeUploadResponse
 from backend.adapters.repository import RepositoryAdapter
@@ -12,10 +15,12 @@ import job_agent
 
 
 class ProfileService:
+    MAX_RESUME_BYTES = 10 * 1024 * 1024  # 10MB
+
     @staticmethod
     def get_profile(user_id: str) -> CandidateProfileSchema:
         prof = RepositoryAdapter.get_candidate_profile(user_id)
-        is_comp = job_agent.is_candidate_profile_complete(prof)
+        is_comp = job_agent.is_candidate_profile_complete(prof) if prof else False
         return CandidateProfileSchema(
             full_name=prof.get("full_name") or "",
             email=prof.get("email") or "",
@@ -62,28 +67,47 @@ class ProfileService:
             is_complete=is_comp,
         )
 
-    @staticmethod
-    def save_resume(filename: str, content: bytes, content_type: str, user_id: str) -> ResumeUploadResponse:
+    @classmethod
+    def save_resume(cls, filename: str, content: bytes, content_type: str, user_id: str) -> ResumeUploadResponse:
         if not content or len(content) < 10:
             raise ValidationError("Resume file cannot be empty.")
+
+        if len(content) > cls.MAX_RESUME_BYTES:
+            raise ValidationError("Resume exceeds maximum allowed size of 10MB.")
 
         ext = os.path.splitext(filename)[1].lower()
         if ext not in (".pdf", ".docx", ".txt"):
             raise ValidationError("Supported resume formats are PDF, DOCX, and TXT.")
 
-        upload_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads")
+        # File signature / magic bytes validation
+        if ext == ".pdf" and not content.startswith(b"%PDF"):
+            raise ValidationError("Invalid PDF format. File signature mismatch.")
+        elif ext == ".docx" and not content.startswith(b"PK\x03\x04"):
+            raise ValidationError("Invalid DOCX format. File signature mismatch.")
+        elif ext == ".txt":
+            try:
+                content.decode("utf-8")
+            except UnicodeDecodeError:
+                raise ValidationError("Invalid text file encoding. UTF-8 required.")
+
+        # Private storage directory - never mounted statically
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        upload_dir = os.path.join(project_root, settings.uploads_dir)
         os.makedirs(upload_dir, exist_ok=True)
 
-        # Sanitize filename
-        safe_hash = str(abs(hash(user_id)))[:8]
-        safe_name = f"resume_{safe_hash}_{os.path.basename(filename)}"
+        # Sanitize filename with visitor session prefix
+        clean_name = re.sub(r"[^\w\.-]", "_", os.path.basename(filename))
+        safe_prefix = re.sub(r"[^\w]", "_", user_id)[:16]
+        safe_name = f"resume_{safe_prefix}_{clean_name}"
         target_path = os.path.abspath(os.path.join(upload_dir, safe_name))
 
+        # Delete any previous resume file for this session
+        cls.delete_resume(user_id)
 
         with open(target_path, "wb") as f:
             f.write(content)
 
-        # Update candidate profile
+        # Update candidate profile state
         prof = RepositoryAdapter.get_candidate_profile(user_id)
         prof["resume_path"] = target_path
         prof["resume_filename"] = filename
@@ -96,6 +120,31 @@ class ProfileService:
             uploaded_at=datetime.now(timezone.utc).isoformat(),
             is_active=True,
         )
+
+    @classmethod
+    def delete_resume(cls, user_id: str) -> bool:
+        """Permanently delete resume file on disk and clear references."""
+        prof = RepositoryAdapter.get_candidate_profile(user_id)
+        path = prof.get("resume_path")
+        deleted = False
+        if path and os.path.exists(path):
+            try:
+                os.remove(path)
+                deleted = True
+            except OSError:
+                pass
+        
+        prof["resume_path"] = ""
+        prof["resume_filename"] = ""
+        RepositoryAdapter.save_candidate_profile(prof, user_id)
+        return deleted
+
+    @classmethod
+    def delete_profile(cls, user_id: str) -> bool:
+        """Permanently erase candidate profile and associated resume."""
+        cls.delete_resume(user_id)
+        RepositoryAdapter.delete_candidate_profile(user_id)
+        return True
 
     @staticmethod
     def get_resume_file(user_id: str) -> str:

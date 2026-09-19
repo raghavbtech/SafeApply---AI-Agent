@@ -1,64 +1,71 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { UserPrincipal } from '../api/contracts';
+import { SessionStatusResponse, UserPrincipal } from '../api/contracts';
 import { api } from '../api/client';
 
-interface AuthContextType {
+interface SessionContextType {
+  session: SessionStatusResponse | null;
   user: UserPrincipal | null;
   loading: boolean;
-  login: (email: string, pass: string) => Promise<void>;
-  register: (email: string, pass: string, name: string) => Promise<void>;
-  logout: () => void;
+  refreshSession: () => Promise<void>;
+  purgeData: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const SessionContext = createContext<SessionContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<UserPrincipal | null>(null);
+  const [session, setSession] = useState<SessionStatusResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
+  const refreshSession = async () => {
+    try {
+      const sess = await api.getSession();
+      setSession(sess);
+    } catch {
+      setSession(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    // Attempt session restore
-    api
-      .getMe()
-      .then((principal) => setUser(principal))
-      .catch(() => setUser(null))
-      .finally(() => setLoading(false));
+    refreshSession();
   }, []);
 
-  const login = async (email: string, pass: string) => {
+  const purgeData = async () => {
     setLoading(true);
     try {
-      const res = await api.login(email, pass);
-      setUser(res.user);
+      await api.purgeSessionData();
+      // Immediately obtain a fresh session for the visitor
+      await refreshSession();
     } finally {
       setLoading(false);
     }
   };
 
-  const register = async (email: string, pass: string, name: string) => {
-    setLoading(true);
-    try {
-      const res = await api.register(email, pass, name);
-      setUser(res.user);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const logout = () => {
-    api.logout();
-    setUser(null);
-  };
+  const user: UserPrincipal | null = session
+    ? {
+        session_id: session.session_id,
+        user_id: session.session_id,
+        created_at: session.created_at,
+        email: `${session.session_id}@anonymous.safeapply.local`,
+        full_name: 'Candidate (Anonymous Session)',
+        role: 'anonymous_candidate',
+      }
+    : null;
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <SessionContext.Provider value={{ session, user, loading, refreshSession, purgeData }}>
       {children}
-    </AuthContext.Provider>
+    </SessionContext.Provider>
   );
 };
 
-export const useAuth = () => {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+export const SessionProvider = AuthProvider;
+
+export const useSession = () => {
+  const ctx = useContext(SessionContext);
+  if (!ctx) throw new Error('useSession must be used within SessionProvider');
   return ctx;
 };
+
+export const useAuth = useSession;

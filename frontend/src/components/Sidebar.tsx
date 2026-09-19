@@ -107,20 +107,24 @@ export const Sidebar: React.FC = () => {
         <div className="mt-6 rounded-xl border border-slate-800 bg-dark-900/60 p-3.5 backdrop-blur-sm">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Active Candidate</span>
-            <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-neon-emerald" />
+            <span className={`h-2 w-2 rounded-full ${profile?.full_name ? 'bg-emerald-500 shadow-neon-emerald' : 'bg-slate-500'}`} />
           </div>
           <div className="mt-2 text-xs font-bold text-white truncate">
-            {profile?.full_name || 'Aarav Sharma'}
+            {profile?.full_name || 'Anonymous Visitor'}
           </div>
           <div className="text-[11px] text-slate-400 truncate">
-            {profile?.education || 'B.Tech Computer Science'}
+            {profile?.education || (profile?.full_name ? 'Candidate' : 'Profile not set')}
           </div>
           <div className="mt-2 flex flex-wrap gap-1">
-            {(profile?.skills || ['Python', 'SQL', 'ML', 'Azure']).slice(0, 3).map((s) => (
-              <span key={s} className="rounded bg-cyan-950/60 border border-cyan-800/40 px-1.5 py-0.5 text-[9px] font-medium text-cyan-300">
-                {s}
-              </span>
-            ))}
+            {profile?.skills && profile.skills.length > 0 ? (
+              profile.skills.slice(0, 3).map((s) => (
+                <span key={s} className="rounded bg-cyan-950/60 border border-cyan-800/40 px-1.5 py-0.5 text-[9px] font-medium text-cyan-300">
+                  {s}
+                </span>
+              ))
+            ) : (
+              <span className="text-[10px] text-slate-500 italic">No skills added yet</span>
+            )}
           </div>
         </div>
 

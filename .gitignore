@@ -35,7 +35,8 @@ quarantine_vault.json
 applied_jobs.json
 candidate_profile.json
 .safeapply_local_db.json
-uploads/
+uploads/*
+!uploads/.gitkeep
 *.db
 *.sqlite
 

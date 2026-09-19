@@ -1,14 +1,13 @@
-"""Tests for candidate profile, resume upload, and IDOR cross-user rejection."""
+"""Tests for candidate profile, resume upload, download, deletion, and IDOR cross-user rejection."""
 
 import pytest
 from httpx import AsyncClient
-from backend.security.identity import create_access_token
-from backend.schemas.auth import UserPrincipal
+from backend.security.session import SessionStore
 
 
 @pytest.mark.asyncio
 async def test_profile_crud_and_resume(async_client: AsyncClient, auth_headers: dict):
-    # 1. Get profile
+    # 1. Get profile (starts empty for new session)
     resp = await async_client.get("/api/v1/profile", headers=auth_headers)
     assert resp.status_code == 200
     profile = resp.json()
@@ -25,7 +24,7 @@ async def test_profile_crud_and_resume(async_client: AsyncClient, auth_headers: 
     assert res_data["full_name"] == "Verified Candidate"
     assert "FastAPI" in res_data["skills"]
 
-    # 3. Upload resume
+    # 3. Upload valid PDF resume
     fake_resume = b"%PDF-1.4 Mock resume content for candidate evaluation."
     files = {"file": ("test_resume.pdf", fake_resume, "application/pdf")}
     resp = await async_client.post("/api/v1/profile/resume", headers=auth_headers, files=files)
@@ -34,20 +33,32 @@ async def test_profile_crud_and_resume(async_client: AsyncClient, auth_headers: 
     assert upload_res["filename"] == "test_resume.pdf"
     assert upload_res["file_size_bytes"] == len(fake_resume)
 
+    # 4. Download resume
+    resp_dl = await async_client.get("/api/v1/profile/resume", headers=auth_headers)
+    assert resp_dl.status_code == 200
+    assert resp_dl.content == fake_resume
+
+    # 5. Delete resume
+    resp_del = await async_client.delete("/api/v1/profile/resume", headers=auth_headers)
+    assert resp_del.status_code == 200
+    assert resp_del.json()["success"] is True
+
+    # 6. Verify resume is deleted
+    resp_dl_after = await async_client.get("/api/v1/profile/resume", headers=auth_headers)
+    assert resp_dl_after.status_code == 404
+
 
 @pytest.mark.asyncio
 async def test_idor_cross_user_isolation(async_client: AsyncClient):
-    # User A headers
-    user_a = UserPrincipal(user_id="user_a@test.com", email="user_a@test.com", full_name="User A")
-    token_a = create_access_token(user_a)
+    # Visitor A session
+    _, token_a = SessionStore.create_session(user_agent="client-a")
     headers_a = {"Authorization": f"Bearer {token_a}"}
 
-    # User B headers
-    user_b = UserPrincipal(user_id="user_b@test.com", email="user_b@test.com", full_name="User B")
-    token_b = create_access_token(user_b)
+    # Visitor B session
+    _, token_b = SessionStore.create_session(user_agent="client-b")
     headers_b = {"Authorization": f"Bearer {token_b}"}
 
-    # Ingest email for User A
+    # Ingest email for Visitor A
     eml_a = b"""From: recruiter@corp.com
 To: user_a@test.com
 Subject: Software Engineer Job Offer
@@ -64,10 +75,10 @@ We are pleased to offer you a Software Engineer position at Corp.
     assert resp_upload.status_code == 200
     email_a_id = resp_upload.json()["id"]
 
-    # User A can fetch it
+    # Visitor A can fetch it
     resp_a = await async_client.get(f"/api/v1/emails/{email_a_id}", headers=headers_a)
     assert resp_a.status_code == 200
 
-    # User B MUST NOT be able to fetch User A's email (404/403)
+    # Visitor B MUST NOT be able to fetch Visitor A's email (404/403)
     resp_b = await async_client.get(f"/api/v1/emails/{email_a_id}", headers=headers_b)
     assert resp_b.status_code in (404, 403)

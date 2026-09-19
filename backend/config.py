@@ -22,18 +22,16 @@ class Settings(BaseSettings):
     environment: str = Field(default="development", alias="SAFEAPPLY_ENV")
     debug: bool = False
 
-    # Security & Auth
-    jwt_secret: str = Field(
-        default="safeapply-development-secret-key-change-in-production-32bytes",
-        alias="SAFEAPPLY_JWT_SECRET",
+    # Security & Anonymous Sessions
+    session_secret: str = Field(
+        default="safeapply-session-secret-key-change-in-production-32bytes",
+        alias="SAFEAPPLY_SESSION_SECRET",
     )
-    jwt_algorithm: str = "HS256"
-    access_token_expire_minutes: int = Field(
-        default=1440, alias="SAFEAPPLY_ACCESS_TOKEN_EXPIRE_MINUTES"
-    )
-    default_user_id: str = Field(
-        default="demo@safeapply.local", alias="SAFEAPPLY_USER_ID"
-    )
+    session_expire_days: int = Field(default=7, alias="SAFEAPPLY_SESSION_EXPIRE_DAYS")
+    cookie_name: str = "safeapply_session"
+    cookie_secure: bool = Field(default=False, alias="SAFEAPPLY_COOKIE_SECURE")
+    cookie_samesite: str = "lax"
+    uploads_dir: str = Field(default="uploads", alias="SAFEAPPLY_UPLOADS_DIR")
     cors_origins_raw: str = Field(
         default="http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000",
         alias="SAFEAPPLY_CORS_ORIGINS",

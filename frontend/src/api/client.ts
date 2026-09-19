@@ -13,7 +13,8 @@ import {
   EmailDetailResponse,
   EmailListItem,
   PaginatedList,
-  TokenResponse,
+  SessionStatusResponse,
+  DataPurgeResponse,
   UserPreferencesSchema,
   UserPrincipal,
   VerificationChecklistResponse,
@@ -24,23 +25,16 @@ import {
 const API_BASE = '/api/v1';
 
 class ApiClient {
-  private getToken(): string | null {
-    return localStorage.getItem('safeapply_token');
-  }
-
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const headers = new Headers(options.headers || {});
-    const token = this.getToken();
-    if (token && !headers.has('Authorization')) {
-      headers.set('Authorization', `Bearer ${token}`);
-    }
 
     if (!(options.body instanceof FormData) && !headers.has('Content-Type')) {
       headers.set('Content-Type', 'application/json');
     }
 
     const url = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
-    const response = await fetch(url, { ...options, headers });
+    // Always include credentials so HTTP-only session cookie is sent and received
+    const response = await fetch(url, { ...options, headers, credentials: 'same-origin' });
 
     if (!response.ok) {
       let errorMsg = 'An unexpected error occurred';
@@ -56,32 +50,38 @@ class ApiClient {
     return response.json();
   }
 
-  // Auth
-  async login(email: string, password: string): Promise<TokenResponse> {
-    const res = await this.request<TokenResponse>('/auth/login', {
+  // Session & Identity
+  async getSession(): Promise<SessionStatusResponse> {
+    return this.request<SessionStatusResponse>('/session');
+  }
+
+  async purgeSessionData(): Promise<DataPurgeResponse> {
+    return this.request<DataPurgeResponse>('/session/data', { method: 'DELETE' });
+  }
+
+  async deleteResume(): Promise<any> {
+    return this.request('/profile/resume', { method: 'DELETE' });
+  }
+
+  async deleteProfile(): Promise<any> {
+    return this.request('/profile', { method: 'DELETE' });
+  }
+
+  async connectMailbox(creds: {
+    provider?: string;
+    username: string;
+    password_or_app_token: string;
+    imap_server?: string;
+    imap_port?: number;
+  }): Promise<any> {
+    return this.request('/mailboxes/connect', {
       method: 'POST',
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify(creds),
     });
-    localStorage.setItem('safeapply_token', res.access_token);
-    return res;
   }
 
-  async register(email: string, password: string, fullName: string): Promise<TokenResponse> {
-    const res = await this.request<TokenResponse>('/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({ email, password, full_name: fullName }),
-    });
-    localStorage.setItem('safeapply_token', res.access_token);
-    return res;
-  }
-
-  async getMe(): Promise<UserPrincipal> {
-    return this.request<UserPrincipal>('/auth/me');
-  }
-
-  logout(): void {
-    localStorage.removeItem('safeapply_token');
-    fetch(`${API_BASE}/auth/logout`, { method: 'POST' }).catch(() => {});
+  async disconnectMailbox(): Promise<any> {
+    return this.request('/mailboxes/disconnect', { method: 'POST' });
   }
 
   // Dashboard

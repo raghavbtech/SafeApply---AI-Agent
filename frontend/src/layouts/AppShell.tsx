@@ -4,7 +4,7 @@ import { Sidebar } from '../components/Sidebar';
 import { Header } from '../components/Header';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import { AlertTriangle, Upload, Check } from 'lucide-react';
+import { AlertTriangle, Upload, Check, Sparkles } from 'lucide-react';
 
 export const AppShell: React.FC = () => {
   const location = useLocation();
@@ -65,7 +65,9 @@ export const AppShell: React.FC = () => {
     },
   });
 
-  const showOnboarding = profile && !profile.is_complete && location.pathname !== '/profile';
+  const [dismissedOnboarding, setDismissedOnboarding] = useState(false);
+
+  const showOnboarding = !dismissedOnboarding && profile && !profile.is_complete && location.pathname !== '/profile';
 
   return (
     <div className="flex min-h-screen bg-dark-950 text-slate-100">
@@ -77,19 +79,25 @@ export const AppShell: React.FC = () => {
         </main>
       </div>
 
-      {/* Mandatory Onboarding Modal if Profile Incomplete (Parity with app.py lines 220-305) */}
+      {/* Optional Onboarding Modal with Skip Action */}
       {showOnboarding && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md">
-          <div className="w-full max-w-xl rounded-2xl border border-cyan-500/30 bg-dark-900 p-6 shadow-2xl shadow-cyan-500/10">
-            <div className="flex items-center gap-3 text-amber-400">
-              <AlertTriangle className="h-6 w-6 shrink-0" />
+          <div className="w-full max-w-xl rounded-2xl border border-cyan-500/30 bg-dark-900 p-6 shadow-2xl shadow-cyan-500/10 relative">
+            <button
+              type="button"
+              onClick={() => setDismissedOnboarding(true)}
+              className="absolute right-4 top-4 p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-surface-raised"
+            >
+              ✕
+            </button>
+            <div className="flex items-center gap-3 text-cyan-400">
+              <Sparkles className="h-6 w-6 shrink-0" />
               <h2 className="font-heading text-lg font-bold text-white">
-                Candidate Profile Setup Required
+                Candidate Profile Setup (Optional)
               </h2>
             </div>
             <p className="mt-2 text-xs text-slate-400">
-              Please enter your details and upload your candidate resume before accessing the application hub.
-              SafeApply uses your real details to calculate skill match and attach your resume.
+              Enter your qualifications and upload your resume to enable personalized job matching and tailored applications. You can skip this step and use the recruitment fraud scanner immediately.
             </p>
 
             <form
@@ -168,21 +176,34 @@ export const AppShell: React.FC = () => {
                 />
               </div>
 
-              <div className="mt-5 flex justify-end gap-3 pt-2">
+              <div className="mt-5 flex items-center justify-between gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => navigate('/profile')}
-                  className="rounded-lg px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white"
+                  onClick={() => setDismissedOnboarding(true)}
+                  className="rounded-lg border border-slate-700 bg-surface-raised px-4 py-2 text-xs font-semibold text-slate-300 hover:text-white"
                 >
-                  Configure in Profile Tab
+                  Skip for now (Scanner Only)
                 </button>
-                <button
-                  type="submit"
-                  disabled={onboardingMutation.isPending}
-                  className="rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 px-5 py-2 text-xs font-semibold text-white shadow-neon-cyan hover:opacity-90 transition disabled:opacity-50"
-                >
-                  {onboardingMutation.isPending ? 'Saving...' : '🚀 Save Profile & Continue'}
-                </button>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDismissedOnboarding(true);
+                      navigate('/profile');
+                    }}
+                    className="rounded-lg px-3 py-2 text-xs font-semibold text-slate-400 hover:text-white"
+                  >
+                    Open Profile Page
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={onboardingMutation.isPending}
+                    className="rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 px-5 py-2 text-xs font-semibold text-white shadow-neon-cyan hover:opacity-90 transition disabled:opacity-50"
+                  >
+                    {onboardingMutation.isPending ? 'Saving...' : '🚀 Save Profile & Continue'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>

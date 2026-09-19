@@ -3,17 +3,32 @@
  * Strictly typed interfaces matching backend Pydantic models.
  */
 
-export interface UserPrincipal {
-  user_id: string;
-  email: string;
+export interface SessionPrincipal {
+  session_id: string;
+  created_at: string;
+  is_new?: boolean;
+  user_id?: string;
+  email?: string;
   full_name?: string | null;
-  role: string;
+  role?: string;
 }
 
-export interface TokenResponse {
-  access_token: string;
-  token_type: string;
-  user: UserPrincipal;
+export type UserPrincipal = SessionPrincipal;
+
+export interface SessionStatusResponse {
+  session_id: string;
+  created_at: string;
+  expires_at?: string | null;
+  has_profile: boolean;
+  has_resume: boolean;
+  has_mailbox: boolean;
+  storage_mode: string;
+}
+
+export interface DataPurgeResponse {
+  success: boolean;
+  message: string;
+  purged_items: Record<string, number>;
 }
 
 export interface EmailListItem {
