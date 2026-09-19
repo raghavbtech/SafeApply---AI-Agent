@@ -12,9 +12,12 @@ A unified, agentic platform combining:
 import os
 import json
 import time
-from datetime import datetime
+import sys
+import importlib
 import streamlit as st
-
+import ui_mailbox
+importlib.reload(ui_mailbox)
+from ui_mailbox import render_inbox_view, render_spam_view, render_sidebar_status
 from agent import (
     analyze_job_offer,
     is_azure_openai_configured,
@@ -22,18 +25,18 @@ from agent import (
 )
 from extractor import is_azure_language_configured
 from search_indexer import is_azure_configured as is_azure_search_configured
-from mail_agent import (
-    MailboxManager,
-    DEFAULT_DEMO_EMAILS,
-    fetch_live_emails,
-    parse_eml_content,
-)
-from security_actions import (
-    quarantine_email,
-    restore_email_from_vault,
-    get_quarantined_records,
-    generate_verification_checklist,
-)
+# from mail_agent import (
+#     MailboxManager,
+#     DEFAULT_DEMO_EMAILS,
+#     fetch_live_emails,
+#     parse_eml_content,
+# )
+# from security_actions import (
+#     quarantine_email,
+#     restore_email_from_vault,
+#     get_quarantined_records,
+#     generate_verification_checklist,
+# )
 from job_agent import (
     extract_job_spec,
     evaluate_candidate_match,
@@ -43,6 +46,18 @@ from job_agent import (
     save_candidate_profile,
     load_applied_jobs,
 )
+
+try:
+    from job_agent import is_candidate_profile_complete
+except ImportError:
+    def is_candidate_profile_complete(profile):
+        if not profile:
+            return False
+        fn = (profile.get("full_name") or "").strip()
+        em = (profile.get("email") or "").strip()
+        rp = (profile.get("resume_path") or "").strip()
+        rf = (profile.get("resume_filename") or "").strip()
+        return bool(fn and em and (rp or rf))
 
 
 # =========================================================
@@ -185,11 +200,11 @@ st.markdown(
 # SESSION STATE INITIALIZATION
 # =========================================================
 
-if "mailbox_mgr" not in st.session_state:
-    st.session_state.mailbox_mgr = MailboxManager()
+# if "mailbox_mgr" not in st.session_state:
+#     st.session_state.mailbox_mgr = MailboxManager()
 
-if "selected_email_id" not in st.session_state:
-    st.session_state.selected_email_id = "EML-001"
+# if "selected_email_id" not in st.session_state:
+#     st.session_state.selected_email_id = "EML-001"
 
 if "candidate_profile" not in st.session_state:
     st.session_state.candidate_profile = load_candidate_profile()
@@ -197,8 +212,93 @@ if "candidate_profile" not in st.session_state:
 if "application_packages" not in st.session_state:
     st.session_state.application_packages = {}
 
+# =========================================================
+# MANDATORY CANDIDATE PROFILE ONBOARDING WINDOW
+# =========================================================
 
-mailbox: MailboxManager = st.session_state.mailbox_mgr
+profile = st.session_state.candidate_profile
+
+if not is_candidate_profile_complete(profile):
+    st.markdown('<div class="main-title">📋 Welcome to SafeApply</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="sub-title">'
+        "Please complete your candidate profile details and upload your resume below to activate the "
+        "autonomous job application and recruiter revert-back engine."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    st.warning("⚠️ **Candidate Profile Setup Required**: You must enter your details and upload your resume before accessing the application hub.")
+    
+    with st.container(border=True):
+        st.markdown("### 📋 Candidate Profile & Resume Onboarding")
+        st.caption("Provide your details to personalize your application packages and automated recruiter revert-back responses.")
+        
+        with st.form("startup_onboarding_form"):
+            ob_c1, ob_c2 = st.columns(2)
+            with ob_c1:
+                ob_name = st.text_input("Full Name *", value=profile.get("full_name", ""))
+                ob_email = st.text_input("Email Address *", value=profile.get("email", ""))
+                ob_phone = st.text_input("Phone Number", value=profile.get("phone", ""))
+                ob_edu = st.text_input("Degree / Major", value=profile.get("education", ""))
+            with ob_c2:
+                ob_univ = st.text_input("University / College", value=profile.get("university", ""))
+                ob_gpa = st.text_input("GPA / Percentage", value=profile.get("gpa", ""))
+                ob_linkedin = st.text_input("LinkedIn Profile", value=profile.get("linkedin_url", ""))
+                ob_portfolio = st.text_input("Portfolio / GitHub", value=profile.get("portfolio_url", ""))
+
+            ob_skills = st.text_area(
+                "Technical Skills (comma-separated)",
+                value=", ".join(profile.get("skills", [])),
+                height=70,
+                placeholder="Python, REST APIs, SQL, Data Structures, Git, Docker...",
+            )
+            ob_exp = st.text_area(
+                "Experience & Project Summary",
+                value=profile.get("experience", ""),
+                height=85,
+                placeholder="Software Engineering Intern (6 months) - Built backend microservices...",
+            )
+            ob_resume = st.file_uploader(
+                "Upload Candidate Resume (PDF, DOCX, TXT) *",
+                type=["pdf", "docx", "txt"],
+                help="This resume file will be attached to outgoing revert-back emails sent to recruiters.",
+            )
+
+            if st.form_submit_button("🚀 Save Profile & Continue to SafeApply", type="primary", use_container_width=True):
+                if not ob_name.strip() or not ob_email.strip():
+                    st.error("Please provide both your Full Name and Email Address.")
+                elif ob_resume is None and not profile.get("resume_path") and not profile.get("resume_filename"):
+                    st.error("Please upload your Resume file (PDF, DOCX, or TXT).")
+                else:
+                    resume_path = profile.get("resume_path", "")
+                    resume_filename = profile.get("resume_filename", "")
+                    if ob_resume is not None:
+                        os.makedirs("uploads", exist_ok=True)
+                        save_dest = os.path.join("uploads", ob_resume.name)
+                        with open(save_dest, "wb") as f:
+                            f.write(ob_resume.getbuffer())
+                        resume_path = os.path.abspath(save_dest)
+                        resume_filename = ob_resume.name
+                    
+                    new_profile = {
+                        "full_name": ob_name.strip(),
+                        "email": ob_email.strip(),
+                        "phone": ob_phone.strip(),
+                        "education": ob_edu.strip(),
+                        "university": ob_univ.strip(),
+                        "gpa": ob_gpa.strip(),
+                        "linkedin_url": ob_linkedin.strip(),
+                        "portfolio_url": ob_portfolio.strip(),
+                        "skills": [s.strip() for s in ob_skills.split(",") if s.strip()],
+                        "experience": ob_exp.strip(),
+                        "resume_path": resume_path,
+                        "resume_filename": resume_filename,
+                    }
+                    save_candidate_profile(new_profile)
+                    st.session_state.candidate_profile = new_profile
+                    st.success("Candidate Profile & Resume saved successfully!")
+                    st.rerun()
+    st.stop()
 
 
 # =========================================================
@@ -223,7 +323,7 @@ with st.sidebar:
     st.markdown(f"**Knowledge RAG**: {search_status}")
     st.markdown(f"**Entity Extraction**: {lang_status}")
     st.markdown("**EMSCAD ML**: 🟢 Active (Joblib Classifier)")
-
+    render_sidebar_status()
     st.divider()
 
     st.caption("Agent Capabilities")
@@ -242,9 +342,9 @@ with st.sidebar:
 
     profile = st.session_state.candidate_profile
     st.caption("Active Candidate")
-    st.markdown(f"👤 **{profile.get('full_name', 'Aarav Sharma')}**")
-    st.caption(f"{profile.get('education', 'B.Tech CSE')}")
-    st.caption(f"Skills: {', '.join(profile.get('skills', [])[:4])}...")
+    st.markdown(f"👤 **{profile.get('full_name') or 'Not Configured'}**")
+    st.caption(f"{profile.get('education') or 'No Degree Specified'}")
+    st.caption(f"Skills: {', '.join(profile.get('skills', [])) if profile.get('skills') else 'None'}")
 
     st.divider()
     st.caption("Responsible AI: SafeApply requires human confirmation before quarantining offers or recording applications.")
@@ -283,514 +383,570 @@ tab_mail, tab_vault, tab_adhoc, tab_profile, tab_tracker = st.tabs([
 # TAB 1: RECRUITMENT MAILBOX & AUTONOMOUS SCANNER
 # =========================================================
 
+# with tab_mail:
+#     stats = mailbox.get_mailbox_stats()
+
+#     # Metric Row
+#     m_col1, m_col2, m_col3, m_col4, m_col5, m_col6 = st.columns(6)
+#     with m_col1:
+#         st.metric("Total Messages", stats["total_emails"])
+#     with m_col2:
+#         st.metric("Recruitment", stats["recruitment_emails"])
+#     with m_col3:
+#         st.metric("Unscanned", stats["unscanned"])
+#     with m_col4:
+#         st.metric("🚨 Scams", stats["high_risk_scams"])
+#     with m_col5:
+#         st.metric("✅ Legitimate", stats["low_risk_legitimate"])
+#     with m_col6:
+#         st.metric("🚀 Applied", stats["applied"])
+
+#     st.write("")
+
+#     # Action Toolbar
+#     act_col0, act_col1, act_col2, act_col3, act_col4 = st.columns([2.0, 1.8, 2.4, 2.0, 1.4])
+#     with act_col0:
+#         if st.button("⚡ Fetch from Database", use_container_width=True, help="Instantly load pre-stored emails from database cache in milliseconds"):
+#             refreshed = mailbox.fetch_from_database()
+#             st.success(f"Loaded {len(refreshed)} emails instantly from database!")
+#             st.rerun()
+
+#     with act_col1:
+#         if st.button("⚡ Scan All Inbox", type="primary", use_container_width=True):
+#             with st.spinner("Agent scanning inbox across Rules, EMSCAD ML, Azure Search RAG, and Azure Foundry..."):
+#                 prog_bar = st.progress(0)
+#                 unscanned_list = [e for e in mailbox.get_recruitment_emails() if e.get("status") == "unscanned"]
+#                 total = len(unscanned_list)
+#                 if total == 0:
+#                     st.info("All recruitment emails are already scanned!")
+#                 else:
+#                     for i, email in enumerate(unscanned_list):
+#                         mailbox.scan_single_email(email["id"])
+#                         prog_bar.progress((i + 1) / total)
+#                     st.success(f"Successfully scanned {total} recruitment emails!")
+#                     st.rerun()
+
+#     with act_col2:
+#         with st.popover("🔗 Sync Gmail / Outlook to DB", use_container_width=True):
+#             st.markdown("#### 📬 Sync Live Mailbox to Database")
+#             st.caption("Fetches recent unread/recruitment messages and pre-stores them in the database for instant access.")
+
+#             provider = st.selectbox("Email Provider", ["Gmail", "Outlook / Hotmail", "Yahoo", "Custom Server"])
+#             live_user = st.text_input("Email Address", placeholder="e.g. yourname@gmail.com")
+#             live_pass = st.text_input("Password or App Password", type="password", help="For Gmail, generate a 16-character App Password.")
+
+#             custom_srv = None
+#             custom_port = 993
+#             if provider == "Custom Server":
+#                 custom_srv = st.text_input("IMAP Server Host", "imap.yourserver.com")
+#                 custom_port = st.number_input("IMAP Port", value=993)
+
+#             fetch_count = st.slider("Max emails to fetch", min_value=3, max_value=25, value=10)
+
+#             if provider == "Gmail":
+#                 st.info(
+#                     "💡 **Gmail Setup Guide:**\n\n"
+#                     "1. Visit [Google Account Security](https://myaccount.google.com/security)\n"
+#                     "2. Ensure **2-Step Verification** is turned ON\n"
+#                     "3. Open **App passwords** (search 'App passwords' in Google settings)\n"
+#                     "4. Generate password for `SafeApply` and paste the 16-letter code here (spaces automatically removed)\n"
+#                     "5. **Important:** In Gmail Settings (gear icon) > See all settings > Forwarding and POP/IMAP, ensure **Enable IMAP** is turned ON."
+#                 )
+#             elif provider == "Outlook / Hotmail":
+#                 st.caption("Works with your Microsoft Account password or an Outlook App Password.")
+
+#             if st.button("📥 Sync Live Inbox to Database", type="primary", use_container_width=True):
+#                 if not live_user or not live_pass:
+#                     st.error("Please enter both email address and password / app password.")
+#                 else:
+#                     with st.spinner(f"Connecting to {provider} and syncing into database store..."):
+#                         try:
+#                             live_fetched = fetch_live_emails(
+#                                 provider=provider,
+#                                 username=live_user,
+#                                 password_or_app_token=live_pass,
+#                                 max_emails=fetch_count,
+#                                 server=custom_srv,
+#                                 port=custom_port,
+#                             )
+#                             if not live_fetched:
+#                                 st.warning("Connected successfully, but no messages were returned from INBOX.")
+#                             else:
+#                                 count = mailbox.ingest_live_emails(live_fetched)
+#                                 st.success(f"Synced {len(live_fetched)} emails directly into database cache ({count} new added)!")
+#                                 st.session_state.selected_email_id = live_fetched[0]["id"]
+#                                 st.rerun()
+#                         except Exception as ex:
+#                             st.error(f"Connection error: {str(ex)}")
+
+#     with act_col3:
+#         with st.popover("➕ Add / Upload Email", use_container_width=True):
+#             st.markdown("#### 📁 Import Email File (.eml)")
+#             st.caption("Export any email from Gmail or Outlook ('Download message') and drop it here.")
+#             eml_file = st.file_uploader("Choose an .eml file", type=["eml"])
+#             if eml_file is not None:
+#                 if st.button("Ingest Uploaded .EML File", type="primary"):
+#                     parsed_eml = parse_eml_content(eml_file.read())
+#                     if not parsed_eml.get("is_recruitment", False):
+#                         st.warning("⚠️ This email was analyzed and determined NOT to be recruitment or job-related. It has been ignored.")
+#                     else:
+#                         mailbox.emails.insert(0, parsed_eml)
+#                         try:
+#                             from database import db_save_emails
+#                             db_save_emails([parsed_eml])
+#                         except Exception:
+#                             pass
+#                         st.session_state.selected_email_id = parsed_eml["id"]
+#                         st.success(f"Uploaded recruitment email '{parsed_eml['subject'][:35]}' into inbox!")
+#                         st.rerun()
+
+#             st.divider()
+#             st.markdown("#### ✍️ Or Paste Manual Message")
+#             new_sender = st.text_input("Sender Email", "hr.recruiter@company.com")
+#             new_name = st.text_input("Sender Name", "Talent Team")
+#             new_company = st.text_input("Company Name", "Tech Solutions")
+#             new_role = st.text_input("Role Title", "Software Engineer")
+#             new_subj = st.text_input("Subject", "Job Opportunity - Software Engineer")
+#             new_body = st.text_area("Email Body", "We are pleased to offer you a role...", height=90)
+#             if st.button("Ingest Pasted Email", type="primary"):
+#                 if new_body.strip():
+#                     created = mailbox.add_custom_email(
+#                         sender=new_sender,
+#                         sender_name=new_name,
+#                         subject=new_subj,
+#                         body=new_body,
+#                         company_name=new_company,
+#                         role_title=new_role,
+#                     )
+#                     if not created.get("is_recruitment", False):
+#                         st.warning("⚠️ The pasted message does not contain recruitment or job indicators. It has been ignored.")
+#                     else:
+#                         st.session_state.selected_email_id = created["id"]
+#                         st.success(f"Added recruitment email {created['id']} to inbox!")
+#                         st.rerun()
+
+#     with act_col4:
+#         if st.button("🔄 Reset Demo", use_container_width=True):
+#             st.session_state.mailbox_mgr = MailboxManager()
+#             st.session_state.selected_email_id = "EML-001"
+#             st.success("Reset demo inbox.")
+#             st.rerun()
+
+#     st.divider()
+
+#     # Split View: Left = Inbox List, Right = Selected Email Dossier
+#     list_col, detail_col = st.columns([4, 6])
+
+#     with list_col:
+#         st.markdown("#### 📥 Incoming Recruitment Messages")
+
+#         # Filter option
+#         filter_opt = st.selectbox(
+#             "Filter Messages",
+#             ["All Recruitment", "Unscanned", "🚨 High Risk Scams", "⚠️ Ambiguous", "✅ Legitimate Jobs", "🛡️ Quarantined", "🚀 Applied"],
+#             index=0,
+#             label_visibility="collapsed",
+#         )
+
+#         all_rec = mailbox.get_recruitment_emails()
+#         filtered_emails = []
+
+#         for e in all_rec:
+#             st_val = e.get("status")
+#             rl_val = e.get("risk_level")
+
+#             if filter_opt == "All Recruitment":
+#                 filtered_emails.append(e)
+#             elif filter_opt == "Unscanned" and st_val == "unscanned":
+#                 filtered_emails.append(e)
+#             elif filter_opt == "🚨 High Risk Scams" and rl_val in ("High", "Critical") and st_val != "quarantined":
+#                 filtered_emails.append(e)
+#             elif filter_opt == "⚠️ Ambiguous" and rl_val == "Medium":
+#                 filtered_emails.append(e)
+#             elif filter_opt == "✅ Legitimate Jobs" and rl_val == "Low":
+#                 filtered_emails.append(e)
+#             elif filter_opt == "🛡️ Quarantined" and st_val == "quarantined":
+#                 filtered_emails.append(e)
+#             elif filter_opt == "🚀 Applied" and st_val == "applied":
+#                 filtered_emails.append(e)
+
+#         if not filtered_emails:
+#             st.info("No emails match the selected filter.")
+
+#         for em in filtered_emails:
+#             em_id = em["id"]
+#             em_status = em.get("status", "unscanned")
+#             em_level = em.get("risk_level")
+#             em_score = em.get("risk_score")
+
+#             # Determine badge
+#             if em_status == "quarantined":
+#                 badge_html = '<span class="risk-badge badge-critical">🛡️ Quarantined</span>'
+#             elif em_status == "applied":
+#                 badge_html = '<span class="risk-badge badge-low">🚀 Applied</span>'
+#             elif em_status == "unscanned":
+#                 badge_html = '<span class="risk-badge badge-neutral">⚪ Unscanned</span>'
+#             elif em_level in ("High", "Critical"):
+#                 badge_html = f'<span class="risk-badge badge-high">🚨 High Risk ({em_score})</span>'
+#             elif em_level == "Medium":
+#                 badge_html = f'<span class="risk-badge badge-medium">⚠️ Medium Risk ({em_score})</span>'
+#             else:
+#                 badge_html = f'<span class="risk-badge badge-low">✅ Low Risk ({em_score})</span>'
+
+#             # Selection highlighting
+#             is_sel = (em_id == st.session_state.selected_email_id)
+#             card_border = "border: 2px solid #6366f1;" if is_sel else "border: 1px solid rgba(148, 163, 184, 0.2);"
+
+#             with st.container():
+#                 st.markdown(
+#                     f"""
+#                     <div style="border-radius: 8px; padding: 0.75rem 0.95rem; margin-bottom: 0.45rem; background-color: rgba(148, 163, 184, 0.04); {card_border}">
+#                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
+#                             <span style="font-size: 0.8rem; font-weight: 600; opacity: 0.65;">{em['id']} · {em['date']}</span>
+#                             {badge_html}
+#                         </div>
+#                         <div style="font-weight: 700; font-size: 0.95rem; margin-bottom: 0.2rem; color: var(--text-color);">{em['subject'][:55]}...</div>
+#                         <div style="font-size: 0.85rem; opacity: 0.85;"><b>{em.get('company_name', 'Company')}</b> · {em.get('role_title', 'Role')}</div>
+#                     </div>
+#                     """,
+#                     unsafe_allow_html=True,
+#                 )
+#                 if st.button(f"Inspect {em_id}", key=f"sel_{em_id}", use_container_width=True):
+#                     st.session_state.selected_email_id = em_id
+#                     st.rerun()
+
+#     # RIGHT: Selected Email Detail & Autonomous Dossier
+#     with detail_col:
+#         sel_email = mailbox.get_email_by_id(st.session_state.selected_email_id)
+#         if not sel_email:
+#             st.info("Select an email from the left pane to view.")
+#         else:
+#             st.markdown(f"### 📋 Email Dossier: {sel_email['id']}")
+
+#             with st.container(border=True):
+#                 c_top1, c_top2 = st.columns([3, 1])
+#                 with c_top1:
+#                     st.markdown(f"**Subject:** {sel_email['subject']}")
+#                     st.markdown(f"**From:** {sel_email['sender_name']} `<{sel_email['sender']}>`")
+#                     st.caption(f"**Date:** {sel_email['date']} | **Claimed Employer:** {sel_email.get('company_name', 'Unknown')}")
+#                 with c_top2:
+#                     st_val = sel_email.get("status")
+#                     if st_val == "unscanned":
+#                         st.markdown('<span class="risk-badge badge-neutral">⚪ Unscanned</span>', unsafe_allow_html=True)
+#                     elif st_val == "quarantined":
+#                         st.markdown('<span class="risk-badge badge-critical">🛡️ Quarantined</span>', unsafe_allow_html=True)
+#                     elif st_val == "applied":
+#                         st.markdown('<span class="risk-badge badge-low">🚀 Applied</span>', unsafe_allow_html=True)
+#                     else:
+#                         rl = sel_email.get("risk_level", "Medium")
+#                         sc = sel_email.get("risk_score", 50)
+#                         cls_name = "badge-high" if rl in ("High", "Critical") else ("badge-medium" if rl == "Medium" else "badge-low")
+#                         st.markdown(f'<span class="risk-badge {cls_name}">{rl} Risk ({sc}/100)</span>', unsafe_allow_html=True)
+
+#             # Expandable Raw Message
+#             with st.expander("📄 View Full Email Content", expanded=(sel_email.get("status") == "unscanned")):
+#                 st.text(sel_email.get("body", ""))
+
+#             # If Unscanned: Button to Scan
+#             if sel_email.get("status") == "unscanned":
+#                 st.write("")
+#                 if st.button("🔍 Scan Email with SafeApply Agent", type="primary", use_container_width=True):
+#                     with st.spinner("Evaluating with Rules + EMSCAD ML + Azure Search RAG + Azure AI Foundry..."):
+#                         mailbox.scan_single_email(sel_email["id"])
+#                         st.rerun()
+
+#             # If Scanned: Present Full Multi-Pillar Analysis + Workflow Actions
+#             elif sel_email.get("analysis"):
+#                 analysis = sel_email["analysis"]
+#                 risk_level = sel_email.get("risk_level", "Medium")
+#                 risk_score = sel_email.get("risk_score", 50)
+
+#                 st.write("")
+#                 st.markdown("#### 🛡️ SafeApply Security Analysis")
+
+#                 # Grounded AI Explanation
+#                 with st.container(border=True):
+#                     st.markdown(f"**Agent Risk Assessment ({risk_score}/100 — {risk_level} Risk)**")
+#                     st.write(analysis.get("explanation", ""))
+#                     st.caption(f"Execution Mode: {analysis.get('execution_mode', 'Live Pipeline')}")
+
+#                 # 4-Pillar Tabs Breakdown
+#                 p_tab1, p_tab2, p_tab3, p_tab4 = st.tabs([
+#                     "🔍 Rules Signals",
+#                     "🧠 EMSCAD ML",
+#                     "📚 Azure Search RAG",
+#                     "🌐 Domain & Salary",
+#                 ])
+
+#                 with p_tab1:
+#                     red_flags = analysis.get("red_flags", [])
+#                     if red_flags:
+#                         st.error(f"**Observed Red Flags ({len(red_flags)}):**")
+#                         for rf in red_flags:
+#                             st.markdown(f"- 🚩 {rf}")
+#                     else:
+#                         st.success("✅ No direct red flags or advance fee requests observed.")
+
+#                 with p_tab2:
+#                     ml_data = analysis.get("ml_classifier", {})
+#                     m_c1, m_c2 = st.columns(2)
+#                     with m_c1:
+#                         st.metric("Fraud Probability", f"{ml_data.get('fraud_probability_pct', 0.0):.1f}%")
+#                     with m_c2:
+#                         st.metric("ML Risk Band", ml_data.get("risk_band", "N/A"))
+
+#                     top_tokens = ml_data.get("top_risk_tokens", [])
+#                     if top_tokens:
+#                         st.markdown("**Learned Risk Tokens:** " + ", ".join([f"`{t}`" for t in top_tokens]))
+#                     st.caption("Advisory statistical signal trained on 17,880 EMSCAD job advertisements.")
+
+#                 with p_tab3:
+#                     rag_data = analysis.get("rag_scam_patterns", [])
+#                     if rag_data:
+#                         st.markdown(f"**Gated RAG Matches ({len(rag_data)}):**")
+#                         for pat in rag_data:
+#                             with st.container():
+#                                 st.markdown(f"**Category:** `{pat.get('category')}`")
+#                                 st.caption(f"Pattern Reference: {pat.get('pattern')}")
+#                                 if pat.get("evidence"):
+#                                     st.markdown(f"*Grounding Evidence in Email:* {', '.join(pat['evidence'])}")
+#                     else:
+#                         st.info("No gated scam patterns matched the observed text.")
+
+#                 with p_tab4:
+#                     d_check = analysis.get("domain_check", {})
+#                     s_check = analysis.get("salary_check", {})
+#                     st.markdown(f"**Domain Analysis:** {d_check.get('assessment', 'N/A')}")
+#                     st.caption(f"Sender Domain: `{d_check.get('sender_domain', 'N/A')}` | Official Domain: `{d_check.get('expected_domain', 'N/A')}`")
+#                     st.markdown(f"**Salary Sanity:** {s_check.get('assessment', 'N/A')}")
+
+#                 st.divider()
+
+#                 # =========================================================
+#                 # AUTONOMOUS WORKFLOW ACTION ENGINES
+#                 # =========================================================
+
+#                 # PATH A: HIGH / CRITICAL RISK -> SAFEAPPLY QUARANTINE
+#                 if risk_level in ("High", "Critical") and sel_email.get("status") != "quarantined":
+#                     st.markdown("### 🚨 High Risk Alert — Security Action Required")
+#                     st.warning(
+#                         "SafeApply identified severe recruitment-scam indicators (e.g. upfront fee, urgency, domain impersonation). "
+#                         "Do not send money, OTPs, or identity documents."
+#                     )
+
+#                     q_c1, q_c2 = st.columns([3, 1])
+#                     with q_c1:
+#                         quarantine_reason = st.text_input(
+#                             "Quarantine Reason",
+#                             value="Advance fee request / domain impersonation detected",
+#                             key=f"q_reason_{sel_email['id']}",
+#                         )
+#                     with q_c2:
+#                         st.write("")
+#                         st.write("")
+#                         if st.button("🛡️ Add to SafeApply Quarantine", type="primary", use_container_width=True):
+#                             rec = quarantine_email(sel_email, reason=quarantine_reason)
+#                             st.success(f"Quarantined! Threat logged to vault with record ID {rec['record_id']}.")
+#                             st.rerun()
+
+#                     st.caption("*(Prototype Quarantine: Isolates this threat in the SafeApply Threat Vault without altering your external mailbox provider)*")
+
+#                 elif sel_email.get("status") == "quarantined":
+#                     st.success("🛡️ This email has been added to SafeApply Quarantine. It is safely isolated in the Threat Vault.")
+
+#                 # PATH B: LOW RISK -> JOB APPLICATION AGENT
+#                 elif risk_level == "Low":
+#                     st.markdown("### 🎯 Legitimate Opportunity — Autonomous Job Agent")
+#                     st.success("SafeApply currently assesses this opportunity as low risk. The Job Application Agent is ready to assist your application.")
+
+#                     job_spec = extract_job_spec(sel_email.get("body", ""), sel_email)
+#                     profile = st.session_state.candidate_profile
+#                     match_res = evaluate_candidate_match(job_spec, profile)
+
+#                     # Match summary card
+#                     with st.container(border=True):
+#                         col_m1, col_m2 = st.columns([2, 3])
+#                         with col_m1:
+#                             st.metric(
+#                                 "Candidate Skill Match",
+#                                 f"{match_res['match_percentage']}%",
+#                                 delta=match_res["match_rating"],
+#                             )
+#                         with col_m2:
+#                             st.markdown(f"**Target Role:** {job_spec['role_title']} at **{job_spec['company_name']}**")
+#                             st.markdown(f"**Location:** {job_spec['location']} | **Compensation:** {job_spec['salary']}")
+
+#                         # Skills breakdown
+#                         st.write("")
+#                         st.markdown("**Matched Skills:**")
+#                         pills_html = "".join([f'<span class="pill-matched">✓ {s}</span>' for s in match_res["matched_skills"]])
+#                         st.markdown(pills_html or "*None direct*", unsafe_allow_html=True)
+
+#                         if match_res["missing_skills"]:
+#                             st.markdown("**Nice-to-Have / Missing Skills:**")
+#                             pills_miss_html = "".join([f'<span class="pill-missing">△ {s}</span>' for s in match_res["missing_skills"]])
+#                             st.markdown(pills_miss_html, unsafe_allow_html=True)
+
+#                     # Generate Application Materials (Cover Letter & Recruiter Reply)
+#                     pkg_key = f"pkg_{sel_email['id']}"
+#                     if pkg_key not in st.session_state.application_packages:
+#                         with st.spinner("Generating tailored cover letter and recruiter response via Azure AI Foundry..."):
+#                             st.session_state.application_packages[pkg_key] = generate_application_package(job_spec, profile)
+
+#                     app_pkg = st.session_state.application_packages[pkg_key]
+
+#                     st.write("")
+#                     st.markdown("#### 📝 AI-Generated Application Materials")
+
+#                     pkg_tab1, pkg_tab2, pkg_tab3 = st.tabs([
+#                         "📄 Tailored Cover Letter",
+#                         "✉️ Recruiter Email Reply",
+#                         "💡 Interview Talking Points",
+#                     ])
+
+#                     with pkg_tab1:
+#                         edited_cl = st.text_area(
+#                             "Cover Letter (Editable)",
+#                             value=app_pkg["cover_letter"],
+#                             height=200,
+#                             key=f"cl_{sel_email['id']}",
+#                         )
+
+#                     with pkg_tab2:
+#                         edited_reply = st.text_area(
+#                             "Recruiter Reply (Editable)",
+#                             value=app_pkg["recruiter_reply"],
+#                             height=140,
+#                             key=f"reply_{sel_email['id']}",
+#                         )
+
+#                     with pkg_tab3:
+#                         st.markdown(app_pkg["qa_talking_points"])
+
+#                     st.write("")
+#                     if sel_email.get("status") == "applied":
+#                         st.success("🎉 Application package recorded in candidate history.")
+#                     else:
+#                         if st.button("📋 Approve & Record Application Package", type="primary", use_container_width=True):
+#                             sub_record = submit_application(
+#                                 email_id=sel_email["id"],
+#                                 job_spec=job_spec,
+#                                 application_package={"cover_letter": edited_cl, "recruiter_reply": edited_reply},
+#                                 candidate_profile=profile,
+#                             )
+#                             mailbox.update_email_status(sel_email["id"], "applied")
+#                             st.success(f"Application package approved and recorded locally! Tracking ID: `{sub_record['submission_id']}`")
+#                             st.caption("*(Prototype Note: Application materials recorded in local candidate history without contacting external career portals)*")
+#                             st.balloons()
+#                             st.rerun()
+
+#                 # PATH C: MEDIUM RISK -> VERIFICATION AGENT CHECKLIST
+#                 elif risk_level == "Medium":
+#                     st.markdown("### ⚠️ Ambiguous Offer — Verification Agent Flow")
+#                     st.warning(
+#                         "This recruitment message has incomplete information, an unverified domain, or elevated statistical signals. "
+#                         "Complete the verification steps below before engaging."
+#                     )
+
+#                     checklist = generate_verification_checklist(sel_email)
+#                     all_verified = True
+#                     for item in checklist:
+#                         chk_val = st.checkbox(
+#                             f"**{item['risk_type']}**: {item['description']}",
+#                             value=False,
+#                             key=f"chk_{sel_email['id']}_{item['id']}",
+#                         )
+#                         if not chk_val:
+#                             all_verified = False
+
+#                     st.write("")
+#                     c_act1, c_act2 = st.columns(2)
+#                     with c_act1:
+#                         if st.button("✅ Confirm User Verification (Trusted Override)", use_container_width=True, disabled=not all_verified):
+#                             # Flaw 7: Preserve original SafeApply risk assessment
+#                             if "original_risk_score" not in sel_email or sel_email["original_risk_score"] is None:
+#                                 sel_email["original_risk_score"] = sel_email.get("risk_score", 50)
+#                                 sel_email["original_risk_level"] = sel_email.get("risk_level", "Medium")
+#                             sel_email["user_override"] = "Verified by Candidate"
+#                             sel_email["status"] = "verified"
+#                             mailbox.update_email_status(sel_email["id"], "verified")
+#                             st.success("Candidate verification confirmed! Original SafeApply risk score preserved in audit trail.")
+#                             st.rerun()
+#                         if not all_verified:
+#                             st.caption("*(Complete all verification checks above to enable candidate override)*")
+
+#                     with c_act2:
+#                         if st.button("🛡️ Add to SafeApply Quarantine", use_container_width=True):
+#                             quarantine_email(sel_email, reason="Failed user verification checks")
+#                             st.warning("Quarantined!")
+#                             st.rerun()
 with tab_mail:
-    stats = mailbox.get_mailbox_stats()
+    def _handle_apply(email):
+        profile = st.session_state.candidate_profile
+        if not is_candidate_profile_complete(profile):
+            st.warning("⚠️ **Candidate Profile Incomplete!** Please enter your Full Name, Email, and upload your Resume in the '👤 Candidate Profile & Skills' tab before applying.")
+            st.session_state["profile_prompt_active"] = True
+            return
 
-    # Metric Row
-    m_col1, m_col2, m_col3, m_col4, m_col5, m_col6 = st.columns(6)
-    with m_col1:
-        st.metric("Total Messages", stats["total_emails"])
-    with m_col2:
-        st.metric("Recruitment", stats["recruitment_emails"])
-    with m_col3:
-        st.metric("Unscanned", stats["unscanned"])
-    with m_col4:
-        st.metric("🚨 Scams", stats["high_risk_scams"])
-    with m_col5:
-        st.metric("✅ Legitimate", stats["low_risk_legitimate"])
-    with m_col6:
-        st.metric("🚀 Applied", stats["applied"])
-
-    st.write("")
-
-    # Action Toolbar
-    act_col1, act_col2, act_col3, act_col4 = st.columns([1.8, 2.5, 2.2, 1.5])
-    with act_col1:
-        if st.button("⚡ Scan All Inbox", type="primary", use_container_width=True):
-            with st.spinner("Agent scanning inbox across Rules, EMSCAD ML, Azure Search RAG, and Azure Foundry..."):
-                prog_bar = st.progress(0)
-                unscanned_list = [e for e in mailbox.get_recruitment_emails() if e.get("status") == "unscanned"]
-                total = len(unscanned_list)
-                if total == 0:
-                    st.info("All recruitment emails are already scanned!")
-                else:
-                    for i, email in enumerate(unscanned_list):
-                        mailbox.scan_single_email(email["id"])
-                        prog_bar.progress((i + 1) / total)
-                    st.success(f"Successfully scanned {total} recruitment emails!")
-                    st.rerun()
-
-    with act_col2:
-        with st.popover("🔗 Connect Gmail / Outlook", use_container_width=True):
-            st.markdown("#### 📬 Connect Live Mailbox (IMAP SSL)")
-            st.caption("Securely fetch real unread/recent recruitment emails from your inbox.")
-
-            provider = st.selectbox("Email Provider", ["Gmail", "Outlook / Hotmail", "Yahoo", "Custom Server"])
-            live_user = st.text_input("Email Address", placeholder="e.g. yourname@gmail.com")
-            live_pass = st.text_input("Password or App Password", type="password", help="For Gmail, generate a 16-character App Password.")
-
-            custom_srv = None
-            custom_port = 993
-            if provider == "Custom Server":
-                custom_srv = st.text_input("IMAP Server Host", "imap.yourserver.com")
-                custom_port = st.number_input("IMAP Port", value=993)
-
-            fetch_count = st.slider("Max emails to fetch", min_value=3, max_value=25, value=10)
-
-            if provider == "Gmail":
-                st.info(
-                    "💡 **Gmail Setup (takes 30 seconds):**\n\n"
-                    "1. Visit [Google Account Security](https://myaccount.google.com/security)\n"
-                    "2. Verify **2-Step Verification** is turned ON\n"
-                    "3. Open **App passwords** (search 'App passwords' in Google settings)\n"
-                    "4. Create an app named `SafeApply` and paste the 16-letter password here."
-                )
-            elif provider == "Outlook / Hotmail":
-                st.caption("Works with your Microsoft Account password or an Outlook App Password.")
-
-            if st.button("📥 Connect & Ingest Live Emails", type="primary", use_container_width=True):
-                if not live_user or not live_pass:
-                    st.error("Please enter both email address and password / app password.")
-                else:
-                    with st.spinner(f"Connecting to {provider} via IMAP SSL and fetching messages..."):
-                        try:
-                            live_fetched = fetch_live_emails(
-                                provider=provider,
-                                username=live_user,
-                                password_or_app_token=live_pass,
-                                max_emails=fetch_count,
-                                server=custom_srv,
-                                port=custom_port,
-                            )
-                            if not live_fetched:
-                                st.warning("Connected successfully, but no messages were returned from INBOX.")
-                            else:
-                                count = mailbox.ingest_live_emails(live_fetched)
-                                st.success(f"Fetched {len(live_fetched)} emails ({count} new added to SafeApply)!")
-                                st.session_state.selected_email_id = live_fetched[0]["id"]
-                                st.rerun()
-                        except Exception as ex:
-                            st.error(f"Connection failed: {str(ex)}")
-
-    with act_col3:
-        with st.popover("➕ Add / Upload Email", use_container_width=True):
-            st.markdown("#### 📁 Import Email File (.eml)")
-            st.caption("Export any email from Gmail or Outlook ('Download message') and drop it here.")
-            eml_file = st.file_uploader("Choose an .eml file", type=["eml"])
-            if eml_file is not None:
-                if st.button("Ingest Uploaded .EML File", type="primary"):
-                    parsed_eml = parse_eml_content(eml_file.read())
-                    mailbox.emails.insert(0, parsed_eml)
-                    st.session_state.selected_email_id = parsed_eml["id"]
-                    st.success(f"Uploaded and parsed email '{parsed_eml['subject'][:35]}' into inbox!")
-                    st.rerun()
-
-            st.divider()
-            st.markdown("#### ✍️ Or Paste Manual Message")
-            new_sender = st.text_input("Sender Email", "hr.recruiter@company.com")
-            new_name = st.text_input("Sender Name", "Talent Team")
-            new_company = st.text_input("Company Name", "Tech Solutions")
-            new_role = st.text_input("Role Title", "Software Engineer")
-            new_subj = st.text_input("Subject", "Job Opportunity - Software Engineer")
-            new_body = st.text_area("Email Body", "We are pleased to offer you a role...", height=90)
-            if st.button("Ingest Pasted Email", type="primary"):
-                if new_body.strip():
-                    created = mailbox.add_custom_email(
-                        sender=new_sender,
-                        sender_name=new_name,
-                        subject=new_subj,
-                        body=new_body,
-                        company_name=new_company,
-                        role_title=new_role,
-                    )
-                    st.session_state.selected_email_id = created["id"]
-                    st.success(f"Added email {created['id']} to inbox!")
-                    st.rerun()
-
-    with act_col4:
-        if st.button("🔄 Reset Demo", use_container_width=True):
-            st.session_state.mailbox_mgr = MailboxManager()
-            st.session_state.selected_email_id = "EML-001"
-            st.success("Reset demo inbox.")
-            st.rerun()
-
-    st.divider()
-
-    # Split View: Left = Inbox List, Right = Selected Email Dossier
-    list_col, detail_col = st.columns([4, 6])
-
-    with list_col:
-        st.markdown("#### 📥 Incoming Recruitment Messages")
-
-        # Filter option
-        filter_opt = st.selectbox(
-            "Filter Messages",
-            ["All Recruitment", "Unscanned", "🚨 High Risk Scams", "⚠️ Ambiguous", "✅ Legitimate Jobs", "🛡️ Quarantined", "🚀 Applied"],
-            index=0,
-            label_visibility="collapsed",
+        job_spec = extract_job_spec(email.get("body", ""), email)
+        pkg_key = f"pkg_{email['id']}"
+        if pkg_key not in st.session_state.application_packages:
+            st.session_state.application_packages[pkg_key] = generate_application_package(job_spec, profile)
+        app_pkg = st.session_state.application_packages[pkg_key]
+        sub_rec = submit_application(
+            email_id=email["id"],
+            job_spec=job_spec,
+            application_package={
+                "cover_letter": app_pkg["cover_letter"],
+                "recruiter_reply": app_pkg["recruiter_reply"],
+            },
+            candidate_profile=profile,
+            email_data=email,
         )
+        st.session_state[f"sub_rec_{email['id']}"] = sub_rec
 
-        all_rec = mailbox.get_recruitment_emails()
-        filtered_emails = []
-
-        for e in all_rec:
-            st_val = e.get("status")
-            rl_val = e.get("risk_level")
-
-            if filter_opt == "All Recruitment":
-                filtered_emails.append(e)
-            elif filter_opt == "Unscanned" and st_val == "unscanned":
-                filtered_emails.append(e)
-            elif filter_opt == "🚨 High Risk Scams" and rl_val in ("High", "Critical") and st_val != "quarantined":
-                filtered_emails.append(e)
-            elif filter_opt == "⚠️ Ambiguous" and rl_val == "Medium":
-                filtered_emails.append(e)
-            elif filter_opt == "✅ Legitimate Jobs" and rl_val == "Low":
-                filtered_emails.append(e)
-            elif filter_opt == "🛡️ Quarantined" and st_val == "quarantined":
-                filtered_emails.append(e)
-            elif filter_opt == "🚀 Applied" and st_val == "applied":
-                filtered_emails.append(e)
-
-        if not filtered_emails:
-            st.info("No emails match the selected filter.")
-
-        for em in filtered_emails:
-            em_id = em["id"]
-            em_status = em.get("status", "unscanned")
-            em_level = em.get("risk_level")
-            em_score = em.get("risk_score")
-
-            # Determine badge
-            if em_status == "quarantined":
-                badge_html = '<span class="risk-badge badge-critical">🛡️ Quarantined</span>'
-            elif em_status == "applied":
-                badge_html = '<span class="risk-badge badge-low">🚀 Applied</span>'
-            elif em_status == "unscanned":
-                badge_html = '<span class="risk-badge badge-neutral">⚪ Unscanned</span>'
-            elif em_level in ("High", "Critical"):
-                badge_html = f'<span class="risk-badge badge-high">🚨 High Risk ({em_score})</span>'
-            elif em_level == "Medium":
-                badge_html = f'<span class="risk-badge badge-medium">⚠️ Medium Risk ({em_score})</span>'
-            else:
-                badge_html = f'<span class="risk-badge badge-low">✅ Low Risk ({em_score})</span>'
-
-            # Selection highlighting
-            is_sel = (em_id == st.session_state.selected_email_id)
-            card_border = "border: 2px solid #6366f1;" if is_sel else "border: 1px solid rgba(148, 163, 184, 0.2);"
-
-            with st.container():
-                st.markdown(
-                    f"""
-                    <div style="border-radius: 8px; padding: 0.75rem 0.95rem; margin-bottom: 0.45rem; background-color: rgba(148, 163, 184, 0.04); {card_border}">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
-                            <span style="font-size: 0.8rem; font-weight: 600; opacity: 0.65;">{em['id']} · {em['date']}</span>
-                            {badge_html}
-                        </div>
-                        <div style="font-weight: 700; font-size: 0.95rem; margin-bottom: 0.2rem; color: var(--text-color);">{em['subject'][:55]}...</div>
-                        <div style="font-size: 0.85rem; opacity: 0.85;"><b>{em.get('company_name', 'Company')}</b> · {em.get('role_title', 'Role')}</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                if st.button(f"Inspect {em_id}", key=f"sel_{em_id}", use_container_width=True):
-                    st.session_state.selected_email_id = em_id
-                    st.rerun()
-
-    # RIGHT: Selected Email Detail & Autonomous Dossier
-    with detail_col:
-        sel_email = mailbox.get_email_by_id(st.session_state.selected_email_id)
-        if not sel_email:
-            st.info("Select an email from the left pane to view.")
-        else:
-            st.markdown(f"### 📋 Email Dossier: {sel_email['id']}")
-
-            with st.container(border=True):
-                c_top1, c_top2 = st.columns([3, 1])
-                with c_top1:
-                    st.markdown(f"**Subject:** {sel_email['subject']}")
-                    st.markdown(f"**From:** {sel_email['sender_name']} `<{sel_email['sender']}>`")
-                    st.caption(f"**Date:** {sel_email['date']} | **Claimed Employer:** {sel_email.get('company_name', 'Unknown')}")
-                with c_top2:
-                    st_val = sel_email.get("status")
-                    if st_val == "unscanned":
-                        st.markdown('<span class="risk-badge badge-neutral">⚪ Unscanned</span>', unsafe_allow_html=True)
-                    elif st_val == "quarantined":
-                        st.markdown('<span class="risk-badge badge-critical">🛡️ Quarantined</span>', unsafe_allow_html=True)
-                    elif st_val == "applied":
-                        st.markdown('<span class="risk-badge badge-low">🚀 Applied</span>', unsafe_allow_html=True)
-                    else:
-                        rl = sel_email.get("risk_level", "Medium")
-                        sc = sel_email.get("risk_score", 50)
-                        cls_name = "badge-high" if rl in ("High", "Critical") else ("badge-medium" if rl == "Medium" else "badge-low")
-                        st.markdown(f'<span class="risk-badge {cls_name}">{rl} Risk ({sc}/100)</span>', unsafe_allow_html=True)
-
-            # Expandable Raw Message
-            with st.expander("📄 View Full Email Content", expanded=(sel_email.get("status") == "unscanned")):
-                st.text(sel_email.get("body", ""))
-
-            # If Unscanned: Button to Scan
-            if sel_email.get("status") == "unscanned":
-                st.write("")
-                if st.button("🔍 Scan Email with SafeApply Agent", type="primary", use_container_width=True):
-                    with st.spinner("Evaluating with Rules + EMSCAD ML + Azure Search RAG + Azure AI Foundry..."):
-                        mailbox.scan_single_email(sel_email["id"])
-                        st.rerun()
-
-            # If Scanned: Present Full Multi-Pillar Analysis + Workflow Actions
-            elif sel_email.get("analysis"):
-                analysis = sel_email["analysis"]
-                risk_level = sel_email.get("risk_level", "Medium")
-                risk_score = sel_email.get("risk_score", 50)
-
-                st.write("")
-                st.markdown("#### 🛡️ SafeApply Security Analysis")
-
-                # Grounded AI Explanation
-                with st.container(border=True):
-                    st.markdown(f"**Agent Risk Assessment ({risk_score}/100 — {risk_level} Risk)**")
-                    st.write(analysis.get("explanation", ""))
-                    st.caption(f"Execution Mode: {analysis.get('execution_mode', 'Live Pipeline')}")
-
-                # 4-Pillar Tabs Breakdown
-                p_tab1, p_tab2, p_tab3, p_tab4 = st.tabs([
-                    "🔍 Rules Signals",
-                    "🧠 EMSCAD ML",
-                    "📚 Azure Search RAG",
-                    "🌐 Domain & Salary",
-                ])
-
-                with p_tab1:
-                    red_flags = analysis.get("red_flags", [])
-                    if red_flags:
-                        st.error(f"**Observed Red Flags ({len(red_flags)}):**")
-                        for rf in red_flags:
-                            st.markdown(f"- 🚩 {rf}")
-                    else:
-                        st.success("✅ No direct red flags or advance fee requests observed.")
-
-                with p_tab2:
-                    ml_data = analysis.get("ml_classifier", {})
-                    m_c1, m_c2 = st.columns(2)
-                    with m_c1:
-                        st.metric("Fraud Probability", f"{ml_data.get('fraud_probability_pct', 0.0):.1f}%")
-                    with m_c2:
-                        st.metric("ML Risk Band", ml_data.get("risk_band", "N/A"))
-
-                    top_tokens = ml_data.get("top_risk_tokens", [])
-                    if top_tokens:
-                        st.markdown("**Learned Risk Tokens:** " + ", ".join([f"`{t}`" for t in top_tokens]))
-                    st.caption("Advisory statistical signal trained on 17,880 EMSCAD job advertisements.")
-
-                with p_tab3:
-                    rag_data = analysis.get("rag_scam_patterns", [])
-                    if rag_data:
-                        st.markdown(f"**Gated RAG Matches ({len(rag_data)}):**")
-                        for pat in rag_data:
-                            with st.container():
-                                st.markdown(f"**Category:** `{pat.get('category')}`")
-                                st.caption(f"Pattern Reference: {pat.get('pattern')}")
-                                if pat.get("evidence"):
-                                    st.markdown(f"*Grounding Evidence in Email:* {', '.join(pat['evidence'])}")
-                    else:
-                        st.info("No gated scam patterns matched the observed text.")
-
-                with p_tab4:
-                    d_check = analysis.get("domain_check", {})
-                    s_check = analysis.get("salary_check", {})
-                    st.markdown(f"**Domain Analysis:** {d_check.get('assessment', 'N/A')}")
-                    st.caption(f"Sender Domain: `{d_check.get('sender_domain', 'N/A')}` | Official Domain: `{d_check.get('expected_domain', 'N/A')}`")
-                    st.markdown(f"**Salary Sanity:** {s_check.get('assessment', 'N/A')}")
-
-                st.divider()
-
-                # =========================================================
-                # AUTONOMOUS WORKFLOW ACTION ENGINES
-                # =========================================================
-
-                # PATH A: HIGH / CRITICAL RISK -> SAFEAPPLY QUARANTINE
-                if risk_level in ("High", "Critical") and sel_email.get("status") != "quarantined":
-                    st.markdown("### 🚨 High Risk Alert — Security Action Required")
-                    st.warning(
-                        "SafeApply identified severe recruitment-scam indicators (e.g. upfront fee, urgency, domain impersonation). "
-                        "Do not send money, OTPs, or identity documents."
-                    )
-
-                    q_c1, q_c2 = st.columns([3, 1])
-                    with q_c1:
-                        quarantine_reason = st.text_input(
-                            "Quarantine Reason",
-                            value="Advance fee request / domain impersonation detected",
-                            key=f"q_reason_{sel_email['id']}",
-                        )
-                    with q_c2:
-                        st.write("")
-                        st.write("")
-                        if st.button("🛡️ Add to SafeApply Quarantine", type="primary", use_container_width=True):
-                            rec = quarantine_email(sel_email, reason=quarantine_reason)
-                            st.success(f"Quarantined! Threat logged to vault with record ID {rec['record_id']}.")
-                            st.rerun()
-
-                    st.caption("*(Prototype Quarantine: Isolates this threat in the SafeApply Threat Vault without altering your external mailbox provider)*")
-
-                elif sel_email.get("status") == "quarantined":
-                    st.success("🛡️ This email has been added to SafeApply Quarantine. It is safely isolated in the Threat Vault.")
-
-                # PATH B: LOW RISK -> JOB APPLICATION AGENT
-                elif risk_level == "Low":
-                    st.markdown("### 🎯 Legitimate Opportunity — Autonomous Job Agent")
-                    st.success("SafeApply verified this opportunity as low risk. The Job Application Agent is ready to assist your application.")
-
-                    job_spec = extract_job_spec(sel_email.get("body", ""), sel_email)
-                    profile = st.session_state.candidate_profile
-                    match_res = evaluate_candidate_match(job_spec, profile)
-
-                    # Match summary card
-                    with st.container(border=True):
-                        col_m1, col_m2 = st.columns([2, 3])
-                        with col_m1:
-                            st.metric(
-                                "Candidate Skill Match",
-                                f"{match_res['match_percentage']}%",
-                                delta=match_res["match_rating"],
-                            )
-                        with col_m2:
-                            st.markdown(f"**Target Role:** {job_spec['role_title']} at **{job_spec['company_name']}**")
-                            st.markdown(f"**Location:** {job_spec['location']} | **Compensation:** {job_spec['salary']}")
-
-                        # Skills breakdown
-                        st.write("")
-                        st.markdown("**Matched Skills:**")
-                        pills_html = "".join([f'<span class="pill-matched">✓ {s}</span>' for s in match_res["matched_skills"]])
-                        st.markdown(pills_html or "*None direct*", unsafe_allow_html=True)
-
-                        if match_res["missing_skills"]:
-                            st.markdown("**Nice-to-Have / Missing Skills:**")
-                            pills_miss_html = "".join([f'<span class="pill-missing">△ {s}</span>' for s in match_res["missing_skills"]])
-                            st.markdown(pills_miss_html, unsafe_allow_html=True)
-
-                    # Generate Application Materials (Cover Letter & Recruiter Reply)
-                    pkg_key = f"pkg_{sel_email['id']}"
-                    if pkg_key not in st.session_state.application_packages:
-                        with st.spinner("Generating tailored cover letter and recruiter response via Azure AI Foundry..."):
-                            st.session_state.application_packages[pkg_key] = generate_application_package(job_spec, profile)
-
-                    app_pkg = st.session_state.application_packages[pkg_key]
-
-                    st.write("")
-                    st.markdown("#### 📝 AI-Generated Application Materials")
-
-                    pkg_tab1, pkg_tab2, pkg_tab3 = st.tabs([
-                        "📄 Tailored Cover Letter",
-                        "✉️ Recruiter Email Reply",
-                        "💡 Interview Talking Points",
-                    ])
-
-                    with pkg_tab1:
-                        edited_cl = st.text_area(
-                            "Cover Letter (Editable)",
-                            value=app_pkg["cover_letter"],
-                            height=200,
-                            key=f"cl_{sel_email['id']}",
-                        )
-
-                    with pkg_tab2:
-                        edited_reply = st.text_area(
-                            "Recruiter Reply (Editable)",
-                            value=app_pkg["recruiter_reply"],
-                            height=140,
-                            key=f"reply_{sel_email['id']}",
-                        )
-
-                    with pkg_tab3:
-                        st.markdown(app_pkg["qa_talking_points"])
-
-                    st.write("")
-                    if sel_email.get("status") == "applied":
-                        st.success("🎉 You have applied for this position! Application tracking record saved.")
-                    else:
-                        if st.button("🚀 Review & Submit Application (1-Click Apply)", type="primary", use_container_width=True):
-                            sub_record = submit_application(
-                                email_id=sel_email["id"],
-                                job_spec=job_spec,
-                                application_package={"cover_letter": edited_cl, "recruiter_reply": edited_reply},
-                                candidate_profile=profile,
-                            )
-                            mailbox.update_email_status(sel_email["id"], "applied")
-                            st.success(f"Application recorded! Tracking ID: `{sub_record['submission_id']}`")
-                            st.balloons()
-                            st.rerun()
-
-                # PATH C: MEDIUM RISK -> VERIFICATION AGENT CHECKLIST
-                elif risk_level == "Medium":
-                    st.markdown("### ⚠️ Ambiguous Offer — Verification Agent Flow")
-                    st.warning(
-                        "This recruitment message has incomplete information, an unverified domain, or elevated statistical signals. "
-                        "Complete the verification steps below before engaging."
-                    )
-
-                    checklist = generate_verification_checklist(sel_email)
-                    for item in checklist:
-                        st.checkbox(
-                            f"**{item['risk_type']}**: {item['description']}",
-                            value=False,
-                            key=f"chk_{sel_email['id']}_{item['id']}",
-                        )
-
-                    st.write("")
-                    c_act1, c_act2 = st.columns(2)
-                    with c_act1:
-                        if st.button("✅ Mark as Verified & Legitimate", use_container_width=True):
-                            sel_email["risk_level"] = "Low"
-                            sel_email["risk_score"] = 20
-                            st.success("Marked as verified!")
-                            st.rerun()
-                    with c_act2:
-                        if st.button("🛡️ Quarantine as Suspicious", use_container_width=True):
-                            quarantine_email(sel_email, reason="Failed user verification checks")
-                            st.warning("Quarantined!")
-                            st.rerun()
-
+    render_inbox_view(on_apply=_handle_apply)
 
 # =========================================================
 # TAB 2: THREAT QUARANTINE VAULT
 # =========================================================
 
+# with tab_vault:
+#     st.markdown("### 🛡️ Quarantined Threat Vault")
+#     st.caption("Isolated recruitment scams and tamper-evident security audit trail.")
+
+#     vault_records = get_quarantined_records()
+
+#     if not vault_records:
+#         st.info("No threats currently quarantined in the vault.")
+#     else:
+#         st.markdown(f"**Total Quarantined Campaigns:** {len(vault_records)}")
+
+#         for rec in vault_records:
+#             with st.container(border=True):
+#                 v_col1, v_col2 = st.columns([4, 1])
+#                 with v_col1:
+#                     st.markdown(f"#### 🚨 {rec.get('claimed_company', 'Unknown Employer')} — {rec.get('role_title', 'Role')}")
+#                     st.markdown(f"**Sender:** `{rec.get('sender')}` | **Subject:** {rec.get('subject')}")
+#                     st.caption(f"**Quarantined:** {rec.get('quarantined_at')} | **Record ID:** `{rec.get('record_id')}`")
+#                     st.markdown(f"**Reason:** {rec.get('reason')}")
+
+#                     indicators = rec.get("observed_indicators", [])
+#                     if indicators:
+#                         st.markdown("**Detected Threat Indicators:**")
+#                         for ind in indicators:
+#                             st.markdown(f"- 🚩 {ind}")
+
+#                 with v_col2:
+#                     st.metric("Threat Score", f"{rec.get('risk_score', 90)}/100")
+#                     st.write("")
+#                     if st.button("↩️ Restore to Inbox", key=f"rst_{rec['email_id']}", use_container_width=True):
+#                         restore_email_from_vault(rec["email_id"], mailbox)
+#                         st.success(f"Restored {rec['email_id']} back to active inbox.")
+#                         st.rerun()
+
 with tab_vault:
-    st.markdown("### 🛡️ Quarantined Threat Vault")
-    st.caption("Isolated recruitment scams and tamper-evident security audit trail.")
-
-    vault_records = get_quarantined_records()
-
-    if not vault_records:
-        st.info("No threats currently quarantined in the vault.")
-    else:
-        st.markdown(f"**Total Quarantined Campaigns:** {len(vault_records)}")
-
-        for rec in vault_records:
-            with st.container(border=True):
-                v_col1, v_col2 = st.columns([4, 1])
-                with v_col1:
-                    st.markdown(f"#### 🚨 {rec.get('claimed_company', 'Unknown Employer')} — {rec.get('role_title', 'Role')}")
-                    st.markdown(f"**Sender:** `{rec.get('sender')}` | **Subject:** {rec.get('subject')}")
-                    st.caption(f"**Quarantined:** {rec.get('quarantined_at')} | **Record ID:** `{rec.get('record_id')}`")
-                    st.markdown(f"**Reason:** {rec.get('reason')}")
-
-                    indicators = rec.get("observed_indicators", [])
-                    if indicators:
-                        st.markdown("**Detected Threat Indicators:**")
-                        for ind in indicators:
-                            st.markdown(f"- 🚩 {ind}")
-
-                with v_col2:
-                    st.metric("Threat Score", f"{rec.get('risk_score', 90)}/100")
-                    st.write("")
-                    if st.button("↩️ Restore to Inbox", key=f"rst_{rec['email_id']}", use_container_width=True):
-                        restore_email_from_vault(rec["email_id"], mailbox)
-                        st.success(f"Restored {rec['email_id']} back to active inbox.")
-                        st.rerun()
-
-
+    render_spam_view()
 # =========================================================
 # TAB 3: AD-HOC TEXT ANALYZER
 # =========================================================
@@ -914,30 +1070,47 @@ with tab_profile:
     with st.form("profile_form"):
         f_c1, f_c2 = st.columns(2)
         with f_c1:
-            p_name = st.text_input("Full Name", prof.get("full_name", "Aarav Sharma"))
-            p_email = st.text_input("Email", prof.get("email", "aarav.sharma@example.com"))
-            p_phone = st.text_input("Phone Number", prof.get("phone", "+91 98765 43210"))
-            p_edu = st.text_input("Degree / Major", prof.get("education", "B.Tech Computer Science"))
+            p_name = st.text_input("Full Name", prof.get("full_name", ""))
+            p_email = st.text_input("Email", prof.get("email", ""))
+            p_phone = st.text_input("Phone Number", prof.get("phone", ""))
+            p_edu = st.text_input("Degree / Major", prof.get("education", ""))
 
         with f_c2:
-            p_univ = st.text_input("University / College", prof.get("university", "National Institute of Technology"))
-            p_gpa = st.text_input("GPA / Percentage", prof.get("gpa", "8.8 / 10.0"))
-            p_linkedin = st.text_input("LinkedIn Profile", prof.get("linkedin_url", "https://linkedin.com/in/aaravsharma"))
-            p_portfolio = st.text_input("Portfolio / GitHub", prof.get("portfolio_url", "https://github.com/aaravsharma"))
+            p_univ = st.text_input("University / College", prof.get("university", ""))
+            p_gpa = st.text_input("GPA / Percentage", prof.get("gpa", ""))
+            p_linkedin = st.text_input("LinkedIn Profile", prof.get("linkedin_url", ""))
+            p_portfolio = st.text_input("Portfolio / GitHub", prof.get("portfolio_url", ""))
 
         p_skills = st.text_area(
             "Technical Skills (comma-separated)",
-            value=", ".join(prof.get("skills", ["Python", "Machine Learning", "SQL", "REST APIs", "Git", "Azure", "Docker"])),
+            value=", ".join(prof.get("skills", [])),
             height=70,
         )
 
         p_exp = st.text_area(
             "Internship & Project Experience Summary",
-            value=prof.get("experience", "Software Engineering Intern at CloudPulse (6 months) - Built scalable backend services with Python and PostgreSQL."),
+            value=prof.get("experience", ""),
             height=90,
         )
 
-        if st.form_submit_button("💾 Save Profile", type="primary"):
+        st.markdown("#### 📄 Candidate Resume Attachment")
+        current_resume = prof.get("resume_filename") or (os.path.basename(prof.get("resume_path", "")) if prof.get("resume_path") else "No resume uploaded yet")
+        st.info(f"**Current Uploaded Resume:** `{current_resume}`")
+
+        uploaded_resume = st.file_uploader("Upload Candidate Resume (PDF, DOCX, TXT)", type=["pdf", "docx", "txt"], help="This file will be attached to outgoing revert-back emails sent to recruiters.")
+
+        if st.form_submit_button("💾 Save Profile & Resume", type="primary"):
+            resume_path = prof.get("resume_path", "")
+            resume_filename = prof.get("resume_filename", "")
+
+            if uploaded_resume is not None:
+                os.makedirs("uploads", exist_ok=True)
+                save_dest = os.path.join("uploads", uploaded_resume.name)
+                with open(save_dest, "wb") as f:
+                    f.write(uploaded_resume.getbuffer())
+                resume_path = os.path.abspath(save_dest)
+                resume_filename = uploaded_resume.name
+
             updated_profile = {
                 "full_name": p_name.strip(),
                 "email": p_email.strip(),
@@ -949,10 +1122,12 @@ with tab_profile:
                 "portfolio_url": p_portfolio.strip(),
                 "skills": [s.strip() for s in p_skills.split(",") if s.strip()],
                 "experience": p_exp.strip(),
+                "resume_path": resume_path,
+                "resume_filename": resume_filename,
             }
             save_candidate_profile(updated_profile)
             st.session_state.candidate_profile = updated_profile
-            st.success("Candidate profile updated successfully!")
+            st.success(f"Candidate profile and resume ('{resume_filename or 'saved'}') updated successfully!")
             st.rerun()
 
 

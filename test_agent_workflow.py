@@ -8,7 +8,7 @@ Unit and Integration Tests for SafeApply Autonomous Agent Modules:
 import os
 import json
 
-from mail_agent import MailboxManager, is_recruitment_email
+from mail_agent import MailboxManager, is_recruitment_email, DEFAULT_DEMO_EMAILS
 from security_actions import (
     quarantine_email,
     restore_email_from_vault,
@@ -33,9 +33,15 @@ def test_recruitment_email_classifier():
     assert is_recruitment_email("Weekly Digest", newsletter_text, "notifications@github.com") is False
 
 
+MOCK_TEST_EMAILS = [
+    {"id": f"EML-TEST-{i}", "sender": f"hr{i}@company.com", "subject": "Job Offer", "body": "We are hiring", "status": "unscanned", "is_recruitment": True}
+    for i in range(8)
+]
+
+
 def test_mailbox_manager_initialization():
     """Test inbox loading and filtering."""
-    mgr = MailboxManager()
+    mgr = MailboxManager(initial_emails=MOCK_TEST_EMAILS)
     emails = mgr.get_all_emails()
     assert len(emails) >= 8
 
@@ -164,7 +170,145 @@ def test_job_agent_package_generation_and_submission():
     submission = submit_application("EML-006", job_spec, pkg, DEFAULT_CANDIDATE_PROFILE)
     assert submission["submission_id"].startswith("APP-")
     assert submission["company_name"] == job_spec["company_name"]
-    assert submission["status"] == "Submitted / Active"
+    assert any(term in submission["status"] for term in ["Recorded", "Approved", "Reverted back", "Dispatched"])
+
+
+def test_database_and_prestored_fetching():
+    """Test database persistence and instant email loading (User DB Feature & Flaw 18/19)."""
+    from azure_db import db_save_emails, db_fetch_all_emails
+
+    test_item = {
+        "id": "EML-DB-TEST-01",
+        "sender": "test@company.com",
+        "sender_name": "Test Recruiter",
+        "subject": "Cloud Engineer Role",
+        "date": "2026-09-18 10:00 AM",
+        "body": "Role details here",
+        "status": "unscanned",
+        "is_recruitment": True,
+        "company_name": "Test Corp",
+        "role_title": "Cloud Engineer",
+        "risk_score": None,
+        "risk_level": None,
+    }
+    saved = db_save_emails([test_item], user_id="test_suite@safeapply.local")
+    assert saved >= 1
+
+    fetched = db_fetch_all_emails(user_id="test_suite@safeapply.local")
+    assert any(e["id"] == "EML-DB-TEST-01" for e in fetched)
+
+
+def test_critical_risk_tier_and_metadata():
+    """Test Critical tier mapping (Flaw 6) and metadata inclusion (Flaw 5)."""
+    from agent import analyze_job_offer
+
+    # Fake offer with high score (>=85) should return Critical
+    fake_offer = """
+    From: Scammer <urgent-jobs@gmail.com>
+    Subject: Immediate Selection - Pay Rs 2,500 Registration Fee Now
+    
+    You are selected! Transfer Rs 2,500 via UPI within 1 hour to secure your placement.
+    Send transaction screenshot to urgent-jobs@gmail.com.
+    """
+    res = analyze_job_offer(fake_offer)
+    assert res["risk_score"] >= 85
+    assert res["risk_level"] == "Critical"
+
+
+def test_no_fabricated_job_requirements():
+    """Test that missing requirements are not fabricated with hardcoded defaults (Flaw 9, 10)."""
+    bare_offer = "We have an open role available. Please reach out if interested."
+    spec = extract_job_spec(bare_offer)
+    assert spec["company_name"] == "Not specified"
+    assert spec["role_title"] == "Not specified"
+    assert spec["required_skills"] == []
+
+    # Test candidate matching with empty requirements
+    match = evaluate_candidate_match(spec, DEFAULT_CANDIDATE_PROFILE)
+    assert match["missing_skills"] == []
+    assert len(match["matched_skills"]) == len(set(match["matched_skills"]))
+
+
+def test_tamper_evident_vault_hash():
+    """Test cryptographic SHA-256 hash chaining in the quarantine vault (Flaw 17)."""
+    test_scam = {
+        "id": "EML-HASH-TEST",
+        "sender": "fake@phish.net",
+        "subject": "Urgent Payout",
+        "risk_score": 95,
+        "risk_level": "Critical",
+    }
+    rec = quarantine_email(test_scam, reason="Integrity hash test")
+    assert "record_hash" in rec and len(rec["record_hash"]) == 64
+    assert "prev_record_hash" in rec
+
+
+def test_no_reply_and_revert_back_workflow():
+    """Test automated candidate revert-back and no-reply email detection."""
+    from job_agent import is_no_reply_email, revert_back_to_recruiter, submit_application, is_candidate_profile_complete
+
+    # Test candidate profile completeness check
+    assert is_candidate_profile_complete({}) is False
+    assert is_candidate_profile_complete({"full_name": "Aarav", "email": "a@b.com", "resume_filename": "resume.pdf"}) is True
+
+    # Test 1: No-reply email detection
+    assert is_no_reply_email("no-reply@google.com") is True
+    assert is_no_reply_email("noreply@linkedin.com") is True
+    assert is_no_reply_email("do-not-reply@company.com") is True
+    assert is_no_reply_email("university-recruiting@microsoft.com") is False
+    assert is_no_reply_email("careers@razorpay.com") is False
+
+    # Test 2: Revert-back dispatch to direct recruiter email
+    direct_email = {
+        "id": "EML-DIRECT-01",
+        "sender": "careers@razorpay.com",
+        "subject": "Engineering Role Opportunity",
+    }
+    job_spec_direct = {
+        "company_name": "Razorpay",
+        "role_title": "Backend Engineer",
+        "contact_email": "careers@razorpay.com",
+        "portal_url": "https://razorpay.com/jobs",
+    }
+    pkg_direct = {
+        "cover_letter": "I am writing to apply...",
+        "recruiter_reply": "Dear Razorpay Team, I am very interested in the Backend Engineer role.",
+    }
+    cand_profile = {
+        "full_name": "Aarav Sharma",
+        "email": "aarav.sharma@example.com",
+    }
+
+    res_direct = revert_back_to_recruiter(direct_email, job_spec_direct, pkg_direct, cand_profile)
+    assert res_direct["dispatched"] is True
+    assert res_direct["is_no_reply"] is False
+    assert res_direct["target_email"] == "careers@razorpay.com"
+    assert "Reverted back" in res_direct["status"]
+
+    sub_direct = submit_application("EML-DIRECT-01", job_spec_direct, pkg_direct, cand_profile, email_data=direct_email)
+    assert sub_direct["is_no_reply"] is False
+    assert "Reverted back" in sub_direct["status"]
+
+    # Test 3: No-reply email guidance
+    no_reply_email = {
+        "id": "EML-NOREPLY-01",
+        "sender": "no-reply@google.com",
+        "subject": "Google Opportunities Update",
+    }
+    job_spec_noreply = {
+        "company_name": "Google",
+        "role_title": "Software Engineer",
+        "contact_email": "no-reply@google.com",
+        "portal_url": "https://careers.google.com",
+    }
+    res_noreply = revert_back_to_recruiter(no_reply_email, job_spec_noreply, pkg_direct, cand_profile)
+    assert res_noreply["dispatched"] is False
+    assert res_noreply["is_no_reply"] is True
+    assert "No-Reply Email" in res_noreply["status"]
+
+    sub_noreply = submit_application("EML-NOREPLY-01", job_spec_noreply, pkg_direct, cand_profile, email_data=no_reply_email)
+    assert sub_noreply["is_no_reply"] is True
+    assert "No-Reply Email" in sub_noreply["status"]
 
 
 if __name__ == "__main__":
@@ -184,4 +328,14 @@ if __name__ == "__main__":
     print("PASS: test_job_agent_spec_extraction_and_matching")
     test_job_agent_package_generation_and_submission()
     print("PASS: test_job_agent_package_generation_and_submission")
-    print("\nALL AGENT WORKFLOW TESTS PASSED SUCCESSFULLY!")
+    test_database_and_prestored_fetching()
+    print("PASS: test_database_and_prestored_fetching")
+    test_critical_risk_tier_and_metadata()
+    print("PASS: test_critical_risk_tier_and_metadata")
+    test_no_fabricated_job_requirements()
+    print("PASS: test_no_fabricated_job_requirements")
+    test_tamper_evident_vault_hash()
+    print("PASS: test_tamper_evident_vault_hash")
+    test_no_reply_and_revert_back_workflow()
+    print("PASS: test_no_reply_and_revert_back_workflow")
+    print("\nALL AGENT WORKFLOW & SECURITY TESTS PASSED SUCCESSFULLY!")

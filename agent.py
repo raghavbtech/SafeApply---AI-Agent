@@ -849,7 +849,31 @@ def synthesize_fallback(
         98,
     )
 
-    if risk_score >= 65:
+    if risk_score >= 85:
+
+        verdict = "Critical"
+
+        if unique_flags:
+
+            evidence_summary = "; ".join(
+                unique_flags[:3]
+            )
+
+            explanation = (
+                "CRITICAL THREAT: This communication exhibits definitive high-severity "
+                "recruitment scam characteristics. Observed indicators: "
+                f"{evidence_summary}. Do not interact, make payments, or share sensitive data. "
+                "Immediate quarantine is recommended."
+            )
+
+        else:
+
+            explanation = (
+                "CRITICAL THREAT: Severe recruitment scam characteristics detected. "
+                "Immediate quarantine and isolation recommended."
+            )
+
+    elif risk_score >= 65:
 
         verdict = "High"
 

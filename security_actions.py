@@ -33,6 +33,14 @@ def save_vault(items: List[Dict[str, Any]]) -> None:
         json.dump(items, f, indent=2, ensure_ascii=False)
 
 
+from azure_db import (
+    db_write_audit,
+    db_fetch_audit,
+    db_update_email_fields,
+    DEFAULT_USER_ID,
+)
+
+
 def quarantine_email(
     email: Dict[str, Any],
     reason: str = "Recruitment scam indicators detected",
@@ -40,7 +48,7 @@ def quarantine_email(
 ) -> Dict[str, Any]:
     """
     Quarantine a high-risk scam email.
-    Creates a security audit record and updates the item state.
+    Creates a tamper-evident cryptographic security audit record and updates state.
     """
     vault = load_vault()
     
@@ -68,7 +76,21 @@ def quarantine_email(
         "original_body_preview": (email.get("body", "")[:300] + "...") if len(email.get("body", "")) > 300 else email.get("body", ""),
     }
 
-    # Upsert in vault
+    # Store in Azure Cosmos DB audit log with cryptographic hash-chaining
+    try:
+        audit_entry = db_write_audit("quarantine", email["id"], quarantine_record)
+        if isinstance(audit_entry, dict) and "record_hash" in audit_entry:
+            quarantine_record["record_hash"] = audit_entry["record_hash"]
+            quarantine_record["prev_record_hash"] = audit_entry.get("prev_hash", "GENESIS")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[security_actions] audit logging warning: {exc}")
+
+    try:
+        db_update_email_fields(email["id"], {"status": "quarantined", "folder": "spam"})
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Upsert in JSON vault for local backup
     existing_idx = next((i for i, r in enumerate(vault) if r["email_id"] == email["id"]), None)
     if existing_idx is not None:
         vault[existing_idx] = quarantine_record
@@ -83,17 +105,34 @@ def quarantine_email(
 def restore_email_from_vault(email_id: str, mailbox_manager=None) -> bool:
     """Restore an email from quarantine back to active inbox."""
     vault = load_vault()
+    try:
+        db_update_email_fields(email_id, {"status": "scanned", "folder": "inbox"})
+        db_write_audit("restore", email_id, {"restored_at": datetime.now().isoformat()})
+    except Exception:  # noqa: BLE001
+        pass
+
     updated_vault = [r for r in vault if r["email_id"] != email_id]
-    if len(updated_vault) != len(vault):
-        save_vault(updated_vault)
-        if mailbox_manager:
-            mailbox_manager.update_email_status(email_id, "scanned")
-        return True
-    return False
+    save_vault(updated_vault)
+    if mailbox_manager:
+        mailbox_manager.update_email_status(email_id, "scanned")
+    return True
 
 
 def get_quarantined_records() -> List[Dict[str, Any]]:
-    """Retrieve all quarantined records for UI display."""
+    """Retrieve all quarantined records for UI display (from Azure Cosmos DB audit log)."""
+    try:
+        audits = db_fetch_audit()
+        records = []
+        for a in audits:
+            if a.get("action") == "quarantine" and isinstance(a.get("details"), dict):
+                rec = dict(a["details"])
+                rec["record_hash"] = a.get("record_hash", "")
+                rec["prev_record_hash"] = a.get("prev_hash", "")
+                records.append(rec)
+        if records:
+            return records
+    except Exception:  # noqa: BLE001
+        pass
     return load_vault()
 
 

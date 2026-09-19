@@ -250,11 +250,13 @@ def _benchmark_case_passes(case: dict, actual: str) -> bool:
     Strict grading for declared benchmark targets.
 
     Clearly Fake, Clearly Legitimate, and Ambiguous cases must match their
-    declared expected verdict exactly. Edge cases may resolve to Low or Medium
-    because incomplete text can reasonably trigger cautious handling.
+    declared expected verdict. For Clearly Fake cases, both High and Critical are valid high-risk verdicts.
     """
     if case["category"] == "Edge Case":
         return actual in ["Low", "Medium"]
+
+    if case["category"] == "Clearly Fake" and case["expected"] == "High":
+        return actual in ["High", "Critical"]
 
     return actual == case["expected"]
 
@@ -385,10 +387,12 @@ def run_grounding_tests():
                 )
 
         expected = case.get("expected")
-        if expected and res["risk_level"] != expected:
-            failures.append(
-                f"expected verdict {expected}, got {res['risk_level']}"
-            )
+        if expected:
+            valid_levels = [expected, "Critical"] if expected == "High" else [expected]
+            if res["risk_level"] not in valid_levels:
+                failures.append(
+                    f"expected verdict {expected}, got {res['risk_level']}"
+                )
 
         if failures:
             status = "FAIL [X]"
