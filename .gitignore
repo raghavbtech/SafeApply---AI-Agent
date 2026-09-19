@@ -43,6 +43,8 @@ uploads/*
 # Frontend & Web Artifacts
 frontend/node_modules/
 frontend/dist/
+frontend/.vite/
+.vite/
 frontend/.env.local
 frontend/.env.*.local
 playwright-report/
