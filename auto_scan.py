@@ -59,6 +59,7 @@ load_dotenv()
 AUTO_QUARANTINE_ENABLED = os.getenv("AUTO_QUARANTINE_ENABLED", "true").lower() == "true"
 AUTO_QUARANTINE_THRESHOLD = int(os.getenv("AUTO_QUARANTINE_THRESHOLD", "65"))
 AUTO_APPLY_ENABLED = os.getenv("AUTO_APPLY_ENABLED", "true").lower() == "true"
+AUTO_APPLY_MAX_RISK_SCORE = int(os.getenv("AUTO_APPLY_MAX_RISK_SCORE", "45"))
 
 # Risk levels that trigger the quarantine path when auto-quarantine is on.
 QUARANTINE_LEVELS = {"High", "Critical"}
@@ -323,16 +324,25 @@ def apply_to_email(doc_id: str, user_id: str = DEFAULT_USER_ID) -> Dict[str, Any
 
 def auto_apply_all_low_risk(user_id: str = DEFAULT_USER_ID) -> List[Dict[str, Any]]:
     """
-    Finds all existing Low risk recruitment emails in Cosmos DB that have not
-    yet been applied to, and automatically executes application packages for them.
+    Finds all existing Low risk or safe recruitment emails in Cosmos DB that have not
+    yet been applied to, and automatically executes application packages and dispatches responses for them.
     """
     emails = db_fetch_all_emails(user_id, folder="inbox")
-    low_unapplied = [
-        e for e in emails
-        if e.get("risk_level") == "Low" and e.get("user_decision") != "applied" and e.get("status") != "applied"
-    ]
+    unapplied = []
+    for e in emails:
+        if e.get("user_decision") == "applied" or e.get("status") == "applied":
+            continue
+        r_level = e.get("risk_level", "Medium")
+        r_score = e.get("risk_score", 50)
+        flags_text = " ".join(str(f).lower() for f in (e.get("analysis") or {}).get("identified_red_flags", []))
+        has_severe = any(
+            kw in flags_text for kw in ("upfront", "fee", "payment", "money", "check", "cheque", "crypto", "bitcoin", "telegram", "whatsapp", "bank account")
+        )
+        if (r_level == "Low" or r_score <= AUTO_APPLY_MAX_RISK_SCORE) and not has_severe:
+            unapplied.append(e)
+
     results = []
-    for email in low_unapplied:
+    for email in unapplied:
         res = apply_to_email(email["id"], user_id=user_id)
         results.append(res)
     return results
@@ -412,12 +422,22 @@ def scan_and_route_email(
         result = move_to_spam(doc_id, reason, user_id, automated=True)
         quarantined = result.get("ok", False)
 
-    # Auto-apply if risk level is Low and not quarantined
+    # Auto-apply if risk level is Low or score is below threshold without severe scam flags
     applied = False
     submission_id = None
     auto_apply = AUTO_APPLY_ENABLED if allow_auto_apply is None else allow_auto_apply
 
-    if risk_level == "Low" and auto_apply and not quarantined:
+    flags_text = " ".join(str(f).lower() for f in analysis.get("identified_red_flags", []))
+    has_severe_scam_indicator = any(
+        kw in flags_text for kw in ("upfront", "fee", "payment", "money", "check", "cheque", "crypto", "bitcoin", "telegram", "whatsapp", "bank account")
+    )
+    is_safe_for_auto_apply = (
+        (risk_level == "Low" or risk_score <= AUTO_APPLY_MAX_RISK_SCORE)
+        and not quarantined
+        and not has_severe_scam_indicator
+    )
+
+    if is_safe_for_auto_apply and auto_apply:
         apply_res = apply_to_email(doc_id, user_id=user_id)
         if apply_res.get("ok"):
             applied = True

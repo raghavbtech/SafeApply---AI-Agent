@@ -582,7 +582,7 @@ def revert_back_to_recruiter(
         for dom in ("@example.com", "@test.com", "@safeapply.local", "@placeholder.com")
     ) or target_email.lower() in ("talent@google.com", "recruiting@microsoft.com", "hr@company.com", "unknown")
 
-    enable_live_smtp = os.getenv("ENABLE_REAL_SMTP_DISPATCH", "false").lower() == "true"
+    enable_live_smtp = os.getenv("ENABLE_REAL_SMTP_DISPATCH", "true").lower() == "true"
 
     if enable_live_smtp and smtp_server and smtp_user and smtp_pass and not is_mock:
         try:
@@ -592,12 +592,25 @@ def revert_back_to_recruiter(
             from email.mime.application import MIMEApplication
 
             msg = MIMEMultipart()
-            msg["Subject"] = f"Re: {job_spec.get('role_title', 'Opportunity')} — {candidate_name}"
+            incoming_subject = email_data.get("subject", "")
+            if incoming_subject:
+                reply_subject = incoming_subject if incoming_subject.lower().startswith("re:") else f"Re: {incoming_subject}"
+            else:
+                reply_subject = f"Re: {job_spec.get('role_title', 'Opportunity')} — {candidate_name}"
+            msg["Subject"] = reply_subject
             msg["From"] = smtp_user or candidate_email
             msg["To"] = target_email
+            if email_data.get("message_id"):
+                msg["In-Reply-To"] = email_data["message_id"]
+                msg["References"] = email_data["message_id"]
             msg.attach(MIMEText(reply_body, "plain"))
 
             # Attach resume file if available
+            if not resume_path or not os.path.exists(resume_path):
+                c_prof = load_candidate_profile()
+                resume_path = c_prof.get("resume_path", "")
+                resume_filename = c_prof.get("resume_filename", "") or os.path.basename(resume_path)
+
             if resume_path and os.path.exists(resume_path):
                 with open(resume_path, "rb") as f:
                     part = MIMEApplication(f.read(), Name=resume_filename or os.path.basename(resume_path))
@@ -606,16 +619,19 @@ def revert_back_to_recruiter(
                 has_attached = True
 
             try:
-                with smtplib.SMTP_SSL(smtp_server, 465, timeout=10) as server:
+                with smtplib.SMTP_SSL(smtp_server, 465, timeout=15) as server:
                     server.login(smtp_user, smtp_pass)
                     server.sendmail(smtp_user, [target_email], msg.as_string())
                 sent_via_smtp = True
-            except Exception:
-                with smtplib.SMTP(smtp_server, 587, timeout=10) as server:
+                print(f"[job_agent] Successfully sent email to {target_email} via SMTP_SSL (465) with resume: {has_attached}")
+            except Exception as ssl_err:
+                print(f"[job_agent] SMTP_SSL attempt failed: {ssl_err}, falling back to port 587 STARTTLS")
+                with smtplib.SMTP(smtp_server, 587, timeout=15) as server:
                     server.starttls()
                     server.login(smtp_user, smtp_pass)
                     server.sendmail(smtp_user, [target_email], msg.as_string())
                 sent_via_smtp = True
+                print(f"[job_agent] Successfully sent email to {target_email} via STARTTLS (587)")
         except Exception as err:  # noqa: BLE001
             print(f"[job_agent] SMTP dispatch warning: {err}")
     else:

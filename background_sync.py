@@ -12,7 +12,7 @@ import time
 from datetime import datetime, timezone
 
 from mail_sync import sync_mailbox_to_db, is_mail_configured
-from auto_scan import scan_all_unscanned
+from auto_scan import scan_all_unscanned, auto_apply_all_low_risk
 from azure_db import DEFAULT_USER_ID, db_set_state
 
 POLL_INTERVAL_SECONDS = int(os.getenv("SAFEAPPLY_POLL_INTERVAL", "60"))  # 60s default
@@ -42,7 +42,13 @@ def _poll_loop(user_id: str):
                     unscanned_results = scan_all_unscanned(user_id=user_id)
                     if unscanned_results:
                         quarantined = sum(1 for r in unscanned_results if r.get("quarantined"))
-                        print(f"[background_sync] Auto-scanned {len(unscanned_results)} emails (quarantined: {quarantined}).")
+                        applied = sum(1 for r in unscanned_results if r.get("applied"))
+                        print(f"[background_sync] Auto-scanned {len(unscanned_results)} emails (quarantined: {quarantined}, applied: {applied}).")
+
+                    # Also ensure any safe, unapplied recruitment emails are auto-applied and responded to
+                    auto_applied = auto_apply_all_low_risk(user_id=user_id)
+                    if auto_applied:
+                        print(f"[background_sync] Auto-applied and dispatched response to {len(auto_applied)} opportunities.")
         except Exception as exc:  # noqa: BLE001
             print(f"[background_sync] poll error: {exc}")
 
