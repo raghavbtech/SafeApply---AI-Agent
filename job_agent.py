@@ -315,6 +315,7 @@ def evaluate_candidate_match(
 def generate_application_package(
     job_spec: Dict[str, Any],
     candidate_profile: Optional[Dict[str, Any]] = None,
+    fast_mode: bool = False,
 ) -> Dict[str, str]:
     """
     Generate a cover letter, recruiter reply draft, and talking points.
@@ -341,7 +342,7 @@ def generate_application_package(
     cover_letter = None
     recruiter_reply = None
 
-    if endpoint and api_key and "your-foundry-resource" not in endpoint:
+    if not fast_mode and endpoint and api_key and "your-foundry-resource" not in endpoint:
         try:
             from openai import OpenAI
 

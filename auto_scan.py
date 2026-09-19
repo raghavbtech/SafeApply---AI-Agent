@@ -271,7 +271,7 @@ def apply_to_email(doc_id: str, user_id: str = DEFAULT_USER_ID) -> Dict[str, Any
     try:
         profile = load_candidate_profile()
         job_spec = extract_job_spec(email.get("body", ""), email)
-        app_pkg = generate_application_package(job_spec, profile)
+        app_pkg = generate_application_package(job_spec, profile, fast_mode=True)
         sub_rec = submit_application(
             email_id=doc_id,
             job_spec=job_spec,
@@ -365,7 +365,7 @@ def scan_and_route_email(
     auto = AUTO_QUARANTINE_ENABLED if allow_auto_quarantine is None else allow_auto_quarantine
 
     try:
-        analysis = analyze_job_offer(build_analysis_context(email))
+        analysis = analyze_job_offer(build_analysis_context(email), fast_mode=True)
     except Exception as exc:  # noqa: BLE001
         db_update_email_fields(
             doc_id, {"status": "error", "error_message": str(exc)}, user_id

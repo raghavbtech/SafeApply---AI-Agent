@@ -179,7 +179,7 @@ def render_sidebar_status() -> None:
 # INBOX VIEW
 # =========================================================
 
-@st.fragment(run_every="20s")
+@st.fragment(run_every="5s")
 def render_inbox_view(
     on_apply: Optional[Callable[[Dict[str, Any]], None]] = None,
     on_ignore: Optional[Callable[[Dict[str, Any]], None]] = None,
@@ -390,7 +390,7 @@ def render_inbox_view(
 # QUARANTINE / SPAM VIEW
 # =========================================================
 
-@st.fragment(run_every="20s")
+@st.fragment(run_every="5s")
 def render_spam_view() -> None:
     """Messages SafeApply moved out of the inbox, with one-click restore."""
     st.markdown("### Quarantine")

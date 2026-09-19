@@ -958,6 +958,7 @@ def synthesize_fallback(
 
 def analyze_job_offer(
     offer_text: str,
+    fast_mode: bool = False,
 ) -> dict:
     """
     Complete SafeApply pipeline.
@@ -1092,7 +1093,7 @@ def analyze_job_offer(
     # OPTIONAL GENAI EXPLANATION
     # -----------------------------------------------------
 
-    if is_genai_active():
+    if is_genai_active() and not fast_mode:
 
         try:
 

@@ -23,12 +23,13 @@ vault. Document this in the README rather than storing passwords in Cosmos.
 """
 
 import os
+import time
 import re
 import socket
 import imaplib
 import email as email_pkg
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from dotenv import load_dotenv
 
@@ -234,10 +235,20 @@ def parse_message(raw_bytes: bytes, uid: str, provider: str) -> Dict[str, Any]:
 
 
 # =========================================================
-# SYNC
+# SYNC CACHING
 # =========================================================
 
+_known_non_recruitment_uids: Set[str] = set()
+_cached_known_uids: Optional[Set[str]] = None
+_cached_known_msg_ids: Optional[Set[str]] = None
+_cache_last_refresh: float = 0.0
 
+
+def invalidate_sync_cache() -> None:
+    global _cached_known_uids, _cached_known_msg_ids, _cache_last_refresh
+    _cached_known_uids = None
+    _cached_known_msg_ids = None
+    _cache_last_refresh = 0.0
 
 
 def sync_mailbox_to_db(
@@ -248,14 +259,15 @@ def sync_mailbox_to_db(
 ) -> Dict[str, Any]:
     """
     High-performance two-tier mailbox sync:
-    1. Pre-fetches known UIDs / Message-IDs from Azure Cosmos DB so existing messages
-       are skipped with zero extra network transfer.
+    1. Pre-fetches known UIDs / Message-IDs from Azure Cosmos DB (cached in memory)
+       so existing messages are skipped with zero extra network transfer.
     2. Batch-fetches headers (UID BODY.PEEK[HEADER.FIELDS (...)]) in chunks of 30-50,
        filtering out non-recruitment messages in milliseconds.
     3. Targeted batch-fetches full content only for candidate recruitment emails using
        BODY.PEEK[] (preserving unread state in mailbox).
     4. Persists verified recruitment emails to Cosmos DB.
     """
+    global _cached_known_uids, _cached_known_msg_ids, _cache_last_refresh
     creds = credentials or get_mail_credentials()
 
     if not creds["username"] or not creds["password"]:
@@ -273,8 +285,15 @@ def sync_mailbox_to_db(
     window_limit = scan_window if scan_window is not None else max(max_messages * 3, 50)
 
     try:
-        # Pre-fetch known identifiers from Cosmos DB for O(1) deduplication
-        known_uids, known_msg_ids = db_get_known_identifiers(user_id)
+        now_ts = time.time()
+        if _cached_known_uids is None or (now_ts - _cache_last_refresh) > 60:
+            k_uids, k_msgs = db_get_known_identifiers(user_id)
+            _cached_known_uids = set(k_uids)
+            _cached_known_msg_ids = set(k_msgs)
+            _cache_last_refresh = now_ts
+
+        known_uids = _cached_known_uids
+        known_msg_ids = _cached_known_msg_ids
 
         mail = open_imap(
             provider=creds["provider"],
@@ -293,9 +312,26 @@ def sync_mailbox_to_db(
         all_uids = data[0].split()
         window = all_uids[-min(len(all_uids), window_limit):]
         window.reverse()  # newest first
-        uid_strs = [u.decode() if isinstance(u, bytes) else str(u) for u in window]
+        raw_uid_strs = [u.decode() if isinstance(u, bytes) else str(u) for u in window]
 
-        # Tier 1: Fast batch header inspection in chunks of 30
+        # Fast local pre-filtering: skip already-stored AND previously inspected non-recruitment messages BEFORE network fetch
+        uid_strs = [
+            u for u in raw_uid_strs
+            if u not in known_uids and u not in _known_non_recruitment_uids
+        ]
+        skipped += (len(raw_uid_strs) - len(uid_strs))
+
+        if not uid_strs:
+            return {
+                "ok": True,
+                "inspected": 0,
+                "recruitment": 0,
+                "stored": 0,
+                "skipped": skipped,
+                "error": "",
+            }
+
+        # Tier 1: Fast batch header inspection in chunks of 30 (only for new UIDs)
         candidate_uids: List[str] = []
         chunk_size = 30
 
@@ -325,8 +361,9 @@ def sync_mailbox_to_db(
                         skipped += 1
                         continue
 
-                    # Pre-filter: definite non-recruitment -> skip body download
+                    # Pre-filter: definite non-recruitment -> record in memory and skip
                     if is_header_definitely_non_recruitment(subj, sender):
+                        _known_non_recruitment_uids.add(str(uid))
                         skipped += 1
                         continue
 
@@ -359,6 +396,8 @@ def sync_mailbox_to_db(
 
                         doc = parse_message(bytes(raw_bytes), uid, creds["provider"])
                         if not doc["is_recruitment"]:
+                            if uid:
+                                _known_non_recruitment_uids.add(str(uid))
                             skipped += 1
                             continue
 
@@ -368,6 +407,12 @@ def sync_mailbox_to_db(
                             break
 
         stored = db_save_emails(to_store, user_id=user_id) if to_store else 0
+        if stored and _cached_known_uids is not None:
+            for d in to_store:
+                if d.get("imap_uid"):
+                    _cached_known_uids.add(str(d["imap_uid"]).strip())
+                if d.get("message_id"):
+                    _cached_known_msg_ids.add(str(d["message_id"]).strip())
 
         db_set_state(
             "last_sync",

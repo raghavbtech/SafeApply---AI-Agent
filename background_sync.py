@@ -15,7 +15,7 @@ from mail_sync import sync_mailbox_to_db, is_mail_configured
 from auto_scan import scan_all_unscanned, auto_apply_all_low_risk
 from azure_db import DEFAULT_USER_ID, db_set_state
 
-POLL_INTERVAL_SECONDS = int(os.getenv("SAFEAPPLY_POLL_INTERVAL", "60"))  # 60s default
+POLL_INTERVAL_SECONDS = int(os.getenv("SAFEAPPLY_POLL_INTERVAL", "10"))  # 10s for ultra-fast response
 
 _poller_started = False
 _lock = threading.Lock()
