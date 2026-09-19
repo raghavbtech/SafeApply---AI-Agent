@@ -28,27 +28,43 @@
   input.bg-white,
   textarea.bg-white,
   select.bg-white,
+  input[type="text"].bg-white,
+  input[type="email"].bg-white,
+  input[type="url"].bg-white,
+  input[type="tel"].bg-white,
+  input[type="password"].bg-white,
   .bg-white input,
   .bg-white textarea,
   .bg-white select,
+  input.text-slate-900,
+  textarea.text-slate-900,
+  select.text-slate-900,
   [data-theme="light"] input,
   [data-theme="light"] textarea,
   [data-theme="light"] select {
     background-color: #FFFFFF !important;
-    color: #111827 !important;
-    caret-color: #111827 !important;
+    color: #000000 !important;
+    -webkit-text-fill-color: #000000 !important;
+    caret-color: #000000 !important;
   }
 
   input.bg-white::placeholder,
   textarea.bg-white::placeholder,
   select.bg-white::placeholder,
+  input[type="text"].bg-white::placeholder,
+  input[type="email"].bg-white::placeholder,
+  input[type="url"].bg-white::placeholder,
+  input[type="tel"].bg-white::placeholder,
   .bg-white input::placeholder,
   .bg-white textarea::placeholder,
   .bg-white select::placeholder,
+  input.text-slate-900::placeholder,
+  textarea.text-slate-900::placeholder,
   [data-theme="light"] input::placeholder,
   [data-theme="light"] textarea::placeholder,
   [data-theme="light"] select::placeholder {
-    color: #6B7280 !important;
+    color: #475569 !important;
+    -webkit-text-fill-color: #475569 !important;
     font-family: 'Poppins', sans-serif;
   }
 
@@ -56,12 +72,16 @@
   input.bg-white:-webkit-autofill,
   input.bg-white:-webkit-autofill:hover,
   input.bg-white:-webkit-autofill:focus,
+  input.text-slate-900:-webkit-autofill,
+  input.text-slate-900:-webkit-autofill:hover,
+  input.text-slate-900:-webkit-autofill:focus,
   .bg-white input:-webkit-autofill,
   .bg-white input:-webkit-autofill:hover,
   .bg-white input:-webkit-autofill:focus {
-    -webkit-text-fill-color: #111827 !important;
+    -webkit-text-fill-color: #000000 !important;
     -webkit-box-shadow: 0 0 0px 1000px #FFFFFF inset !important;
-    caret-color: #111827 !important;
+    caret-color: #000000 !important;
+    color: #000000 !important;
     transition: background-color 5000s ease-in-out 0s;
   }
 

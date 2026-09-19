@@ -116,7 +116,7 @@ export const AppShell: React.FC = () => {
                     placeholder="e.g. Aarav Sharma"
                     defaultValue={profile?.full_name || ''}
                     onChange={(e) => setObName(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-700 bg-dark-850 px-3 py-1.5 text-xs text-white focus:border-cyan-500 focus:outline-none"
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 placeholder:text-slate-500 caret-black font-medium focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 focus:outline-none"
                   />
                 </div>
                 <div>
@@ -127,7 +127,7 @@ export const AppShell: React.FC = () => {
                     placeholder="e.g. aarav@example.com"
                     defaultValue={profile?.email || ''}
                     onChange={(e) => setObEmail(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-700 bg-dark-850 px-3 py-1.5 text-xs text-white focus:border-cyan-500 focus:outline-none"
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 placeholder:text-slate-500 caret-black font-medium focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 focus:outline-none"
                   />
                 </div>
               </div>
@@ -140,7 +140,7 @@ export const AppShell: React.FC = () => {
                     placeholder="+91 98765 43210"
                     defaultValue={profile?.phone || ''}
                     onChange={(e) => setObPhone(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-700 bg-dark-850 px-3 py-1.5 text-xs text-white focus:border-cyan-500 focus:outline-none"
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 placeholder:text-slate-500 caret-black font-medium focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 focus:outline-none"
                   />
                 </div>
                 <div>
@@ -150,7 +150,7 @@ export const AppShell: React.FC = () => {
                     placeholder="B.Tech Computer Science"
                     defaultValue={profile?.education || ''}
                     onChange={(e) => setObEdu(e.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-700 bg-dark-850 px-3 py-1.5 text-xs text-white focus:border-cyan-500 focus:outline-none"
+                    className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 placeholder:text-slate-500 caret-black font-medium focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 focus:outline-none"
                   />
                 </div>
               </div>
@@ -162,7 +162,7 @@ export const AppShell: React.FC = () => {
                   placeholder="Python, SQL, REST APIs, Git, Docker"
                   defaultValue={profile?.skills?.join(', ') || ''}
                   onChange={(e) => setObSkills(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-slate-700 bg-dark-850 px-3 py-1.5 text-xs text-white focus:border-cyan-500 focus:outline-none"
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-900 placeholder:text-slate-500 caret-black font-medium focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 focus:outline-none"
                 />
               </div>
 

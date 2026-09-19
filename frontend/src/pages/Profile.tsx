@@ -220,14 +220,14 @@ export const Profile: React.FC = () => {
               <div className="space-y-1.5">
                 <label className="text-slate-300 font-medium">Full Name *</label>
                 <div className="relative">
-                  <User className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3" />
+                  <User className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3 pointer-events-none" />
                   <input
                     type="text"
                     required
                     value={formData.full_name}
                     onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
                     placeholder="Jane Doe"
-                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-surface-raised border border-border-subtle text-white focus:outline-none focus:border-neon-cyan"
+                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan font-medium"
                   />
                 </div>
               </div>
@@ -235,14 +235,14 @@ export const Profile: React.FC = () => {
               <div className="space-y-1.5">
                 <label className="text-slate-300 font-medium">Email Address *</label>
                 <div className="relative">
-                  <Mail className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3" />
+                  <Mail className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3 pointer-events-none" />
                   <input
                     type="email"
                     required
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                     placeholder="jane.doe@example.com"
-                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-surface-raised border border-border-subtle text-white focus:outline-none focus:border-neon-cyan"
+                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan font-medium"
                   />
                 </div>
               </div>
@@ -250,13 +250,13 @@ export const Profile: React.FC = () => {
               <div className="space-y-1.5">
                 <label className="text-slate-300 font-medium">Phone Number</label>
                 <div className="relative">
-                  <Phone className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3" />
+                  <Phone className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3 pointer-events-none" />
                   <input
                     type="text"
                     value={formData.phone || ''}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                     placeholder="+1 (555) 019-2834"
-                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-surface-raised border border-border-subtle text-white focus:outline-none focus:border-neon-cyan"
+                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan font-medium"
                   />
                 </div>
               </div>
@@ -264,13 +264,13 @@ export const Profile: React.FC = () => {
               <div className="space-y-1.5">
                 <label className="text-slate-300 font-medium">Years of Experience</label>
                 <div className="relative">
-                  <Briefcase className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3" />
+                  <Briefcase className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3 pointer-events-none" />
                   <input
                     type="text"
                     value={formData.experience || ''}
                     onChange={(e) => setFormData({ ...formData, experience: e.target.value })}
                     placeholder="e.g. 5+ years"
-                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-surface-raised border border-border-subtle text-white focus:outline-none focus:border-neon-cyan"
+                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan font-medium"
                   />
                 </div>
               </div>
@@ -280,13 +280,13 @@ export const Profile: React.FC = () => {
               <div className="space-y-1.5">
                 <label className="text-slate-300 font-medium">LinkedIn Profile URL</label>
                 <div className="relative">
-                  <Linkedin className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3" />
+                  <Linkedin className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3 pointer-events-none" />
                   <input
                     type="url"
                     value={formData.linkedin_url || ''}
                     onChange={(e) => setFormData({ ...formData, linkedin_url: e.target.value })}
                     placeholder="https://linkedin.com/in/janedoe"
-                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-surface-raised border border-border-subtle text-white focus:outline-none focus:border-neon-cyan"
+                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan font-medium"
                   />
                 </div>
               </div>
@@ -294,13 +294,13 @@ export const Profile: React.FC = () => {
               <div className="space-y-1.5">
                 <label className="text-slate-300 font-medium">Portfolio or GitHub URL</label>
                 <div className="relative">
-                  <Globe className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3" />
+                  <Globe className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3 pointer-events-none" />
                   <input
                     type="url"
                     value={formData.portfolio_url || ''}
                     onChange={(e) => setFormData({ ...formData, portfolio_url: e.target.value })}
                     placeholder="https://github.com/janedoe"
-                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-surface-raised border border-border-subtle text-white focus:outline-none focus:border-neon-cyan"
+                    className="w-full pl-9 pr-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan font-medium"
                   />
                 </div>
               </div>
@@ -322,7 +322,7 @@ export const Profile: React.FC = () => {
                   value={formData.education || ''}
                   onChange={(e) => setFormData({ ...formData, education: e.target.value })}
                   placeholder="B.S. in Computer Science"
-                  className="w-full px-3 py-2 rounded-xl bg-surface-raised border border-border-subtle text-white focus:outline-none focus:border-neon-violet"
+                  className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-violet focus:ring-1 focus:ring-neon-violet font-medium"
                 />
               </div>
 
@@ -333,7 +333,7 @@ export const Profile: React.FC = () => {
                   value={formData.university || ''}
                   onChange={(e) => setFormData({ ...formData, university: e.target.value })}
                   placeholder="University of Washington"
-                  className="w-full px-3 py-2 rounded-xl bg-surface-raised border border-border-subtle text-white focus:outline-none focus:border-neon-violet"
+                  className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-violet focus:ring-1 focus:ring-neon-violet font-medium"
                 />
               </div>
 
@@ -344,7 +344,7 @@ export const Profile: React.FC = () => {
                   value={formData.gpa || ''}
                   onChange={(e) => setFormData({ ...formData, gpa: e.target.value })}
                   placeholder="3.85"
-                  className="w-full px-3 py-2 rounded-xl bg-surface-raised border border-border-subtle text-white focus:outline-none focus:border-neon-violet"
+                  className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-violet focus:ring-1 focus:ring-neon-violet font-medium"
                 />
               </div>
             </div>
@@ -369,7 +369,7 @@ export const Profile: React.FC = () => {
                 onChange={(e) => setNewSkill(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddSkill())}
                 placeholder="Add skill (e.g. Python, Azure, React, Docker)..."
-                className="flex-1 px-3.5 py-2 text-xs rounded-xl bg-surface-raised border border-border-subtle text-white focus:outline-none focus:border-neon-cyan"
+                className="flex-1 px-3.5 py-2 text-xs rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan font-medium"
               />
               <button
                 type="button"
@@ -421,7 +421,7 @@ export const Profile: React.FC = () => {
                     onChange={(e) => setNewRole(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddRole())}
                     placeholder="e.g. Senior Software Engineer, Cloud Architect..."
-                    className="flex-1 px-3.5 py-2 text-xs rounded-xl bg-surface-raised border border-border-subtle text-white focus:outline-none focus:border-neon-cyan"
+                    className="flex-1 px-3.5 py-2 text-xs rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan font-medium"
                   />
                   <button
                     type="button"
@@ -456,7 +456,7 @@ export const Profile: React.FC = () => {
                     onChange={(e) => setNewLocation(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddLocation())}
                     placeholder="e.g. Remote, San Francisco, CA, New York, NY..."
-                    className="flex-1 px-3.5 py-2 text-xs rounded-xl bg-surface-raised border border-border-subtle text-white focus:outline-none focus:border-neon-cyan"
+                    className="flex-1 px-3.5 py-2 text-xs rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan font-medium"
                   />
                   <button
                     type="button"
