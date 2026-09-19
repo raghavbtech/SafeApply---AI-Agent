@@ -409,9 +409,10 @@ def db_mailbox_stats(user_id: str = DEFAULT_USER_ID) -> Dict[str, int]:
 # =========================================================
 
 def _hash_record(record: Dict[str, Any]) -> str:
-    payload = {k: v for k, v in record.items() if k != "record_hash"}
+    payload = {k: v for k, v in record.items() if k != "record_hash" and not k.startswith("_")}
     blob = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
 
 
 def db_write_audit(
