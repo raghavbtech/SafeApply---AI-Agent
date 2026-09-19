@@ -7,7 +7,26 @@ export default {
   darkMode: 'class',
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Poppins', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+        heading: ['Poppins', 'sans-serif'],
+        poppins: ['Poppins', 'sans-serif'],
+        mono: ['JetBrains Mono', 'monospace'],
+      },
       colors: {
+        surface: {
+          deep: '#06090F',
+          card: '#0B0F19',
+          cardHover: '#101626',
+          raised: '#101626',
+          border: '#1E293B',
+          subtle: '#161F36',
+        },
+        'surface-card': '#0B0F19',
+        'surface-raised': '#101626',
+        'surface-border': '#1E293B',
+        'border-subtle': 'rgba(255, 255, 255, 0.08)',
+        'border-medium': 'rgba(255, 255, 255, 0.16)',
         dark: {
           950: '#06090F',
           900: '#0B0F19',

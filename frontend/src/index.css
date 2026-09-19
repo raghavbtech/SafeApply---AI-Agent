@@ -3,15 +3,79 @@
 @tailwind utilities;
 
 @layer base {
+  *, ::before, ::after {
+    font-family: 'Poppins', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
   body {
     background-color: #06090F;
     color: #F8FAFC;
-    font-family: 'Inter', sans-serif;
+    font-family: 'Poppins', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     overflow-x: hidden;
   }
 
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Outfit', sans-serif;
+    font-family: 'Poppins', sans-serif;
+    letter-spacing: -0.015em;
+  }
+
+  /* Universal input, textarea, select typography */
+  input, textarea, select, button {
+    font-family: 'Poppins', sans-serif;
+  }
+
+  /* White form controls explicit contrast requirements */
+  input.bg-white,
+  textarea.bg-white,
+  select.bg-white,
+  .bg-white input,
+  .bg-white textarea,
+  .bg-white select,
+  [data-theme="light"] input,
+  [data-theme="light"] textarea,
+  [data-theme="light"] select {
+    background-color: #FFFFFF !important;
+    color: #111827 !important;
+    caret-color: #111827 !important;
+  }
+
+  input.bg-white::placeholder,
+  textarea.bg-white::placeholder,
+  select.bg-white::placeholder,
+  .bg-white input::placeholder,
+  .bg-white textarea::placeholder,
+  .bg-white select::placeholder,
+  [data-theme="light"] input::placeholder,
+  [data-theme="light"] textarea::placeholder,
+  [data-theme="light"] select::placeholder {
+    color: #6B7280 !important;
+    font-family: 'Poppins', sans-serif;
+  }
+
+  /* Autofill rules for white inputs */
+  input.bg-white:-webkit-autofill,
+  input.bg-white:-webkit-autofill:hover,
+  input.bg-white:-webkit-autofill:focus,
+  .bg-white input:-webkit-autofill,
+  .bg-white input:-webkit-autofill:hover,
+  .bg-white input:-webkit-autofill:focus {
+    -webkit-text-fill-color: #111827 !important;
+    -webkit-box-shadow: 0 0 0px 1000px #FFFFFF inset !important;
+    caret-color: #111827 !important;
+    transition: background-color 5000s ease-in-out 0s;
+  }
+
+  /* Default dark input autofill preservation */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  textarea:-webkit-autofill,
+  textarea:-webkit-autofill:hover,
+  textarea:-webkit-autofill:focus {
+    -webkit-text-fill-color: #F8FAFC;
+    -webkit-box-shadow: 0 0 0px 1000px #101626 inset;
+    caret-color: #06B6D4;
+    transition: background-color 5000s ease-in-out 0s;
   }
 }
 

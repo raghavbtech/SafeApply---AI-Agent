@@ -76,8 +76,12 @@ class RepositoryAdapter:
 
     @staticmethod
     def purge_user_data(user_id: str) -> Dict[str, int]:
-        """Purge all data (emails, audit, state, profile) for this user/session."""
-        return azure_db.db_purge_user_data(user_id=user_id)
+        """Purge all data (emails, audit, state, profile, resumes) for this user/session."""
+        counts = azure_db.db_purge_user_data(user_id=user_id)
+        from backend.adapters.blob_storage import BlobStorageAdapter
+        resumes_purged = BlobStorageAdapter.purge_user_resumes(user_id=user_id)
+        counts["resumes"] = resumes_purged
+        return counts
 
     @staticmethod
     def get_preferences(user_id: str) -> Dict[str, Any]:

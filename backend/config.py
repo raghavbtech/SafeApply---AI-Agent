@@ -37,7 +37,7 @@ class Settings(BaseSettings):
         alias="SAFEAPPLY_CORS_ORIGINS",
     )
 
-    # Persistence
+    # Persistence & Durable Storage
     cosmos_endpoint: str = Field(default="", alias="COSMOS_ENDPOINT")
     cosmos_key: str = Field(default="", alias="COSMOS_KEY")
     cosmos_database: str = Field(default="safeapply", alias="COSMOS_DATABASE")
@@ -46,6 +46,18 @@ class Settings(BaseSettings):
     local_db_path: str = Field(
         default=".safeapply_local_db.json", alias="SAFEAPPLY_LOCAL_DB"
     )
+    azure_storage_connection_string: str = Field(
+        default="", alias="AZURE_STORAGE_CONNECTION_STRING"
+    )
+    azure_storage_container: str = Field(
+        default="candidate-resumes", alias="AZURE_STORAGE_CONTAINER"
+    )
+
+    # Abuse Controls & Rate Limiting
+    rate_limit_enabled: bool = Field(default=True, alias="SAFEAPPLY_RATE_LIMIT_ENABLED")
+    rate_limit_analysis_rpm: int = Field(default=45, alias="RATE_LIMIT_ANALYSIS_RPM")
+    rate_limit_upload_rpm: int = Field(default=15, alias="RATE_LIMIT_UPLOAD_RPM")
+    csrf_protection_enabled: bool = Field(default=True, alias="SAFEAPPLY_CSRF_ENABLED")
 
     # Mailbox IMAP / SMTP
     mail_provider: str = Field(default="Gmail", alias="MAIL_PROVIDER")

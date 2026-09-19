@@ -12,6 +12,67 @@ import azure_db
 from backend.config import settings
 
 
+import base64
+import hashlib
+import os
+
+
+def _get_encryption_key() -> bytes:
+    return hashlib.sha256(settings.session_secret.encode("utf-8")).digest()
+
+
+def encrypt_credential(plain_text: str) -> str:
+    if not plain_text:
+        return ""
+    try:
+        from cryptography.fernet import Fernet
+        key = base64.urlsafe_b64encode(_get_encryption_key())
+        f = Fernet(key)
+        return f.encrypt(plain_text.encode("utf-8")).decode("utf-8")
+    except Exception:
+        # Reversible authenticated XOR stream fallback
+        iv = os.urandom(16)
+        key = _get_encryption_key()
+        keystream = hashlib.sha256(key + iv).digest()
+        plain_bytes = plain_text.encode("utf-8")
+        while len(keystream) < len(plain_bytes):
+            keystream += hashlib.sha256(key + keystream).digest()
+        cipher = bytes(p ^ k for p, k in zip(plain_bytes, keystream))
+        mac = hashlib.sha256(key + iv + cipher).digest()[:8]
+        return "enc:" + base64.b64encode(iv + mac + cipher).decode("utf-8")
+
+
+def decrypt_credential(cipher_text: str) -> str:
+    if not cipher_text:
+        return ""
+    try:
+        if not cipher_text.startswith("enc:"):
+            from cryptography.fernet import Fernet
+            key = base64.urlsafe_b64encode(_get_encryption_key())
+            f = Fernet(key)
+            return f.decrypt(cipher_text.encode("utf-8")).decode("utf-8")
+    except Exception:
+        pass
+
+    if cipher_text.startswith("enc:"):
+        try:
+            raw = base64.b64decode(cipher_text[4:].encode("utf-8"))
+            iv, mac, cipher = raw[:16], raw[16:24], raw[24:]
+            key = _get_encryption_key()
+            expected_mac = hashlib.sha256(key + iv + cipher).digest()[:8]
+            if mac != expected_mac:
+                return ""
+            keystream = hashlib.sha256(key + iv).digest()
+            while len(keystream) < len(cipher):
+                keystream += hashlib.sha256(key + keystream).digest()
+            plain_bytes = bytes(c ^ k for c, k in zip(cipher, keystream))
+            return plain_bytes.decode("utf-8")
+        except Exception:
+            return ""
+
+    return cipher_text
+
+
 class MailProviderAdapter:
     @staticmethod
     def is_configured(user_id: Optional[str] = None) -> bool:
@@ -25,7 +86,7 @@ class MailProviderAdapter:
     def get_connection_info(user_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Check mailbox connection for this specific visitor session.
-        Falls back to global .env credentials only if user_id is the default demo user.
+        Never returns raw or encrypted passwords to the frontend or API callers.
         """
         if user_id:
             auth = azure_db.db_get_state("mailbox_auth", default=None, user_id=user_id)
@@ -56,11 +117,13 @@ class MailProviderAdapter:
 
     @staticmethod
     def connect_mailbox(user_id: str, creds: Dict[str, Any]) -> Dict[str, Any]:
-        """Save per-session mailbox authorization."""
+        """Save per-session mailbox authorization with encrypted credentials."""
+        raw_token = creds.get("password_or_app_token", "")
+        encrypted_token = encrypt_credential(raw_token)
         state = {
             "provider": creds.get("provider", "Gmail"),
             "username": creds.get("username", ""),
-            "password_or_token": creds.get("password_or_app_token", ""),
+            "encrypted_password_or_token": encrypted_token,
             "imap_server": creds.get("imap_server") or "imap.gmail.com",
             "imap_port": creds.get("imap_port", 993),
             "is_connected": True,
@@ -69,6 +132,22 @@ class MailProviderAdapter:
         }
         azure_db.db_set_state("mailbox_auth", state, user_id=user_id)
         return MailProviderAdapter.get_connection_info(user_id)
+
+    @staticmethod
+    def get_decrypted_credentials(user_id: str) -> Optional[Dict[str, Any]]:
+        """Internal helper for background workers to retrieve decrypted credentials."""
+        auth = azure_db.db_get_state("mailbox_auth", default=None, user_id=user_id)
+        if not auth or not isinstance(auth, dict) or not auth.get("is_connected"):
+            return None
+        enc = auth.get("encrypted_password_or_token") or auth.get("password_or_token", "")
+        token = decrypt_credential(enc)
+        return {
+            "provider": auth.get("provider", "Gmail"),
+            "username": auth.get("username", ""),
+            "password_or_token": token,
+            "imap_server": auth.get("imap_server", "imap.gmail.com"),
+            "imap_port": auth.get("imap_port", 993),
+        }
 
     @staticmethod
     def disconnect_mailbox(user_id: str) -> bool:

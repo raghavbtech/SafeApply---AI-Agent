@@ -4,7 +4,7 @@ Candidate Profile and Resume endpoints.
 
 import os
 from fastapi import APIRouter, Depends, File, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from backend.schemas.profile import CandidateProfileSchema, ResumeUploadResponse
 from backend.schemas.auth import UserPrincipal
 from backend.services.profile_service import ProfileService
@@ -42,11 +42,11 @@ async def upload_resume(
 
 @router.get("/resume")
 async def download_resume(current_user: UserPrincipal = Depends(get_current_user)):
-    file_path = ProfileService.get_resume_file(user_id=current_user.user_id)
-    return FileResponse(
-        path=file_path,
-        media_type="application/octet-stream",
-        filename=os.path.basename(file_path),
+    content, filename, media_type = ProfileService.get_resume_bytes(user_id=current_user.user_id)
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

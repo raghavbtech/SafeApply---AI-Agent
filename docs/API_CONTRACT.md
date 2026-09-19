@@ -11,8 +11,12 @@ SafeApply operates as a 100% public, account-free web application:
 - **No Login / No Signup**: Visitors are never prompted for usernames, passwords, or OAuth logins.
 - **Anonymous Sessions**: On the first request to any endpoint, a cryptographically secure random session is generated (`anon_<uuid>`). The raw token is delivered via an HTTP-only, SameSite cookie, and only its SHA-256 hash is retained on the server.
 - **Partitioned Data Isolation**: Cosmos DB `/user_id` partition keys and local database state use `session_id`. Visitor A can never inspect or alter Visitor B's profile, resume, emails, or applications.
+- **Durable Azure Blob Storage for Resumes**: Resume files are stored securely in private Azure Blob Storage (or session-isolated local storage fallback). Resumes are downloaded as streaming byte responses; storage paths and access keys are never exposed to clients.
+- **Mailbox Credential Encryption at Rest**: IMAP/SMTP credentials are encrypted via Fernet/authenticated cipher stream before persistence in Cosmos DB or local state. Passwords and app tokens are never returned in responses.
+- **Abuse & DoS Controls**: In-memory sliding-window rate limiters protect sensitive endpoints (threat analysis, resume upload, application dispatch, mailbox sync).
+- **CSRF Protection**: State-changing cookie-authenticated requests enforce strict `Origin` / `Referer` validation against allowed CORS origins.
 - **Frictionless Scanner Access**: Visitors can immediately use `/scan`, `/dashboard`, `/inbox`, `/quarantine`, and `/audit` without completing candidate onboarding.
-- **Candidate Privacy & Complete Data Erasure**: Visitors can trigger "Delete My Data" at any time to purge their profile, disk-stored resume, imported emails, and cryptographic audit records.
+- **Candidate Privacy & Complete Data Erasure**: Visitors can trigger "Delete My Data" at any time to purge their profile, blob-stored resume, imported emails, encrypted mailbox credentials, and cryptographic audit records.
 
 ---
 

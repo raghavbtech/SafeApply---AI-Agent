@@ -104,12 +104,19 @@ class ProfileService:
         # Delete any previous resume file for this session
         cls.delete_resume(user_id)
 
-        with open(target_path, "wb") as f:
-            f.write(content)
+        # Upload via BlobStorageAdapter (Azure Blob with local fallback)
+        from backend.adapters.blob_storage import BlobStorageAdapter
+        opaque_ref, clean_name = BlobStorageAdapter.upload_resume(
+            user_id=user_id,
+            filename=filename,
+            content=content,
+            content_type=content_type,
+        )
 
         # Update candidate profile state
         prof = RepositoryAdapter.get_candidate_profile(user_id)
-        prof["resume_path"] = target_path
+        prof["resume_opaque_ref"] = opaque_ref
+        prof["resume_path"] = opaque_ref
         prof["resume_filename"] = filename
         RepositoryAdapter.save_candidate_profile(prof, user_id)
 
@@ -123,17 +130,17 @@ class ProfileService:
 
     @classmethod
     def delete_resume(cls, user_id: str) -> bool:
-        """Permanently delete resume file on disk and clear references."""
+        """Permanently delete resume from blob/disk storage and clear references."""
         prof = RepositoryAdapter.get_candidate_profile(user_id)
-        path = prof.get("resume_path")
-        deleted = False
-        if path and os.path.exists(path):
-            try:
-                os.remove(path)
-                deleted = True
-            except OSError:
-                pass
+        opaque_ref = prof.get("resume_opaque_ref") or prof.get("resume_path")
         
+        from backend.adapters.blob_storage import BlobStorageAdapter
+        deleted = False
+        if opaque_ref:
+            deleted = BlobStorageAdapter.delete_resume(opaque_ref, user_id)
+        BlobStorageAdapter.purge_user_resumes(user_id)
+        
+        prof["resume_opaque_ref"] = ""
         prof["resume_path"] = ""
         prof["resume_filename"] = ""
         RepositoryAdapter.save_candidate_profile(prof, user_id)
@@ -147,9 +154,31 @@ class ProfileService:
         return True
 
     @staticmethod
-    def get_resume_file(user_id: str) -> str:
+    def get_resume_bytes(user_id: str) -> tuple[bytes, str, str]:
+        """Download resume bytes, original filename, and media type."""
         prof = RepositoryAdapter.get_candidate_profile(user_id)
-        path = prof.get("resume_path")
-        if not path or not os.path.exists(path):
+        opaque_ref = prof.get("resume_opaque_ref") or prof.get("resume_path")
+        if not opaque_ref:
             raise NotFoundError(resource="Resume", identifier="active_resume")
-        return path
+
+        from backend.adapters.blob_storage import BlobStorageAdapter
+        res = BlobStorageAdapter.download_resume(opaque_ref, user_id)
+        if not res:
+            raise NotFoundError(resource="Resume", identifier="active_resume")
+        
+        content, fname, ctype = res
+        orig_filename = prof.get("resume_filename") or fname
+        return content, orig_filename, ctype
+
+    @staticmethod
+    def get_resume_file(user_id: str) -> str:
+        """Compatibility helper returning a readable local file path."""
+        content, fname, _ = ProfileService.get_resume_bytes(user_id)
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        safe_user = re.sub(r"[^\w]", "_", user_id)[:32]
+        temp_dir = os.path.join(project_root, settings.uploads_dir, safe_user)
+        os.makedirs(temp_dir, exist_ok=True)
+        local_path = os.path.join(temp_dir, fname)
+        with open(local_path, "wb") as f:
+            f.write(content)
+        return local_path

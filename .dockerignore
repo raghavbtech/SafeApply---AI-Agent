@@ -1,0 +1,40 @@
+# Git
+.git/
+.gitignore
+
+# Environment & Secrets
+.env
+.env.*
+*.env
+*.key
+*.pem
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local databases & runtime files
+.safeapply_local_db.json
+candidate_profile.json
+applied_jobs.json
+quarantine_vault.json
+DataSet.csv
+uploads/*
+!uploads/.gitkeep
+*.log
+
+# Frontend files (deployed separately via Azure Static Web Apps)
+frontend/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

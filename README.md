@@ -57,9 +57,10 @@ Visitor Opens Site ➔ Server issues anonymous HTTP-only cookie ➔ Immediate ac
 2. **Server-Side Token Hashing**: The server stores only the `SHA-256` hash of the session token. Raw tokens are never stored in databases or log files.
 3. **Strict Data Partitioning**: Cosmos DB partition keys (`/user_id`) and local JSON storage use `session_id`. Visitor A can never inspect or alter Visitor B's profile, resume, emails, applications, or audit logs.
 4. **Optional & Skippable Onboarding**: Visitors can immediately analyze ad-hoc text or imported `.eml` files without entering personal information. The candidate onboarding modal is fully dismissible with a "Skip for now (Scanner Only)" action. Candidate profile and resume details are only required when calculating skill matching or drafting applications in the Job Agent.
-5. **Private Resume Storage**: Uploaded resumes (PDF, DOCX, TXT; 10MB limit) are validated using magic file signatures, stored in private, unexposed directories, and isolated per session.
-6. **Per-Session Mailbox Isolation**: Personal mailbox connections (IMAP/SMTP) are saved strictly inside the visitor's session partition. A "Disconnect Mailbox" action deletes stored credentials immediately.
-7. **Complete Data Erasure ("Delete My Data")**: At any time, a visitor can click "Delete My Data" in the header or settings. This invokes `DELETE /api/v1/session/data` which permanently purges the candidate profile, disk-stored resume files, stored emails, job applications, mailbox credentials, and cryptographic audit records.
+5. **Private Azure Blob Resume Storage**: Uploaded resumes (PDF, DOCX, TXT; 10MB limit) are validated using magic file signatures, stored in private Azure Blob Storage (with local filesystem fallback), and isolated per session. Resumes are downloaded via byte streaming; physical paths are never exposed.
+6. **Encrypted Mailbox Credentials**: Personal mailbox connections (IMAP/SMTP) encrypt passwords and app tokens at rest using Fernet/authenticated cipher stream before storage in Cosmos DB. A "Disconnect Mailbox" action permanently deletes stored credentials immediately.
+7. **Rate Limiting & CSRF Protection**: Sensitive endpoints are protected by in-memory sliding-window rate limiters. Cookie-authenticated mutation requests validate `Origin` and `Referer` headers against allowed origins.
+8. **Complete Data Erasure ("Delete My Data")**: At any time, a visitor can click "Delete My Data" in the header or settings. This invokes `DELETE /api/v1/session/data` which permanently purges the candidate profile, blob-stored resume files, stored emails, job applications, encrypted mailbox credentials, and cryptographic audit records.
 
 ---
 

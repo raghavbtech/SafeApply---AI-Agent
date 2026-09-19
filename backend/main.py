@@ -42,6 +42,13 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Rate Limiting & CSRF Middleware
+    from backend.security.rate_limiter import rate_limit_middleware
+    from backend.security.csrf import csrf_protect_middleware
+
+    app.middleware("http")(rate_limit_middleware)
+    app.middleware("http")(csrf_protect_middleware)
+
     # Exception Handlers
     app.add_exception_handler(SafeApplyError, safeapply_exception_handler)
     app.add_exception_handler(Exception, generic_exception_handler)
