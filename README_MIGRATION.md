@@ -1,19 +1,22 @@
-# SafeApply — React + FastAPI Migration Guide
+# SafeApply — React + FastAPI Migration & Architecture Guide
 
 ## Architecture Overview
 
-SafeApply has been migrated from a single monolithic Streamlit presentation layer into a modern, decoupled client-server architecture:
+SafeApply has evolved from a single monolithic Streamlit presentation layer into a modern, decoupled client-server architecture built for public, account-free recruitment security:
 
 1. **Frontend**: React 18 + Vite + TypeScript + TailwindCSS + Motion + Lucide React.
-   - Dark neon aesthetic with curated cyan/violet/coral tokens.
-   - TanStack Query for caching and real-time polling.
-   - Strict separation of concern: client never calculates risk scores or holds credentials.
-2. **Backend**: FastAPI (`/api/v1`) with Pydantic v2 schemas.
-   - Enforces authentication and per-user data ownership on every route.
-   - Wraps the tested Python ML, RAG, heuristic, IMAP, and SMTP logic through clean adapter layers.
+   - Dark neon cyberpunk aesthetic with curated cyan/violet/coral tokens.
+   - TanStack Query for reactive server state and real-time polling.
+   - **Zero Login / Zero Signup**: Direct access to scanner, dashboard, mailbox, quarantine vault, and verification without login walls or demo credential forms.
+   - **Privacy First**: Header and settings include a prominent "Delete My Data" modal triggering complete server-side data purging.
+2. **Backend**: FastAPI (`/api/v1`) with Pydantic v2 schemas and modular service adapters.
+   - **Server-Side Anonymous Sessions**: Issues unpredictable `safeapply_session` HTTP-only cookies on first visit.
+   - **Token Hashing**: Stores only SHA-256 hashes of session tokens on the server.
+   - **Strict Data Partitioning**: Cosmos DB `/user_id` partition keys and local JSON database use `session_id` to guarantee 100% tenant isolation across public visitors.
+   - Wraps tested Python ML (EMSCAD), RAG (Azure AI Search), GenAI (Azure AI Foundry Phi-4-mini), heuristic, IMAP, and SMTP logic through clean adapter layers.
    - Safe defaults: destructive actions and auto-sends require explicit opt-in or human confirmation.
-3. **Persistence**: Azure Cosmos DB partitioned by `/user_id` with local JSON (`.safeapply_local_db.json`) fallback.
-4. **Legacy Preservation**: The Streamlit interface (`app.py` and `ui_mailbox.py`) remains 100% functional side-by-side during the transition.
+3. **Persistence**: Azure Cosmos DB partitioned by `/user_id` with local JSON (`.safeapply_local_db.json`) fallback. Includes complete data purge method `db_purge_user_data(user_id)`.
+4. **Legacy Preservation**: The original Streamlit interface (`app.py` and `ui_mailbox.py`) remains 100% functional side-by-side.
 
 ---
 
@@ -47,15 +50,14 @@ streamlit run app.py
 
 ### 5. Running Automated Tests
 ```powershell
-# Original regression suites
-python -m pytest test_agent_workflow.py -vv
+# Original regression suites (13 tests)
+python -m pytest test_agent_workflow.py -v
 python test_pipeline.py
 
-# FastAPI API & Security suite
-python -m pytest tests/api/ -vv
+# FastAPI API, Anonymous Sessions & Security suite (16 tests)
+python -m pytest tests/api/test_anonymous_sessions.py tests/api/test_profile_and_security.py tests/api/test_health_and_session.py -v
 
 # Frontend build & typecheck
 cd frontend
-npm run typecheck
 npm run build
 ```

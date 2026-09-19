@@ -1,58 +1,61 @@
 """
-FastAPI Dependencies: Authentication and Principal resolution.
+FastAPI Dependencies: Anonymous Visitor Session and Principal resolution.
+Zero accounts, zero passwords, automatic cookie issuance.
 """
 
 from typing import Optional
-from fastapi import Depends, Header, Cookie, Request
+from fastapi import Header, Request, Response
 from backend.config import settings
-from backend.errors import UnauthorizedError
-from backend.schemas.auth import UserPrincipal
-from backend.security.identity import decode_access_token
+from backend.schemas.auth import SessionPrincipal
+from backend.security.session import SessionStore
 
 
-async def get_current_user(
+async def get_current_session(
     request: Request,
+    response: Response,
     authorization: Optional[str] = Header(None),
-    safeapply_session: Optional[str] = Cookie(None),
-) -> UserPrincipal:
+) -> SessionPrincipal:
     """
-    Extract and validate the authenticated user principal from Bearer token or session cookie.
-    In development mode, if no token is provided, safely resolves to the configured default demo user.
+    Resolve visitor's private session from HTTP-only cookie or Bearer token.
+    If missing, expired, or invalid, automatically issues a brand-new cryptographically
+    secure anonymous session and attaches the Set-Cookie header.
     """
-    token = None
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization[len("Bearer ") :].strip()
-    elif safeapply_session:
-        token = safeapply_session.strip()
+    raw_token = None
 
-    if token:
-        principal = decode_access_token(token)
+    # Check Authorization header (for test suites, scripts, or non-browser clients)
+    if authorization and authorization.startswith("Bearer "):
+        raw_token = authorization[len("Bearer ") :].strip()
+
+    # Check HTTP-only session cookie
+    if not raw_token:
+        cookie_val = request.cookies.get(settings.cookie_name)
+        if cookie_val:
+            raw_token = cookie_val.strip()
+
+    # If token present, validate against server-side token hash
+    if raw_token:
+        principal = SessionStore.validate_session(raw_token)
         if principal:
             return principal
-        raise UnauthorizedError("Invalid or expired session token.")
 
-    # Development convenience fallback: allow demo user if in development environment
-    if settings.environment == "development":
-        return UserPrincipal(
-            user_id=settings.default_user_id,
-            email=settings.default_user_id,
-            full_name="Aarav Sharma (Demo Candidate)",
-            role="candidate",
-        )
+    # Missing, expired, or tampered token: issue brand-new anonymous session
+    principal, new_raw_token = SessionStore.create_session(
+        user_agent=request.headers.get("user-agent")
+    )
 
-    raise UnauthorizedError("Authentication required. Please sign in.")
+    # Set secure HTTP-only session cookie
+    response.set_cookie(
+        key=settings.cookie_name,
+        value=new_raw_token,
+        httponly=True,
+        samesite=settings.cookie_samesite,
+        secure=settings.cookie_secure,
+        max_age=settings.session_expire_days * 86400,
+        path="/",
+    )
+
+    return principal
 
 
-async def get_optional_user(
-    authorization: Optional[str] = Header(None),
-    safeapply_session: Optional[str] = Cookie(None),
-) -> Optional[UserPrincipal]:
-    token = None
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization[len("Bearer ") :].strip()
-    elif safeapply_session:
-        token = safeapply_session.strip()
-
-    if token:
-        return decode_access_token(token)
-    return None
+# Backwards compatibility alias
+get_current_user = get_current_session

@@ -36,9 +36,8 @@ export const App: React.FC = () => {
       <BrowserRouter>
         <AuthProvider>
           <Routes>
-            {/* Public Routes */}
+            {/* Public Landing Page */}
             <Route path="/" element={<Landing />} />
-            <Route path="/login" element={<Landing />} />
 
             {/* Authenticated Application Shell */}
             <Route

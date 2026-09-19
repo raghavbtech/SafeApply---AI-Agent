@@ -582,10 +582,51 @@ def db_get_state(key: str, default: Any = None, user_id: str = DEFAULT_USER_ID) 
         except Exception:
             return default
 
-    for row in _local_query("state", user_id):
-        if row.get("id") == f"state_{key}":
-            return row.get("value", default)
-    return default
+def db_purge_user_data(user_id: Optional[str] = None) -> Dict[str, int]:
+    """
+    Permanently delete all emails, audit records, and state documents for the specified user_id.
+    Ensures complete data erasure upon candidate request.
+    """
+    uid = user_id or DEFAULT_USER_ID
+    counts = {"emails": 0, "audit": 0, "state": 0}
+
+    # 1. Cosmos DB deletion if configured
+    email_container = _get_container(COSMOS_EMAIL_CONTAINER)
+    audit_container = _get_container(COSMOS_AUDIT_CONTAINER)
+
+    if email_container is not None:
+        try:
+            query = "SELECT c.id FROM c WHERE c.user_id = @uid"
+            params = [{"name": "@uid", "value": uid}]
+            items = list(email_container.query_items(query=query, parameters=params, enable_cross_partition_query=False))
+            for it in items:
+                email_container.delete_item(item=it["id"], partition_key=uid)
+                counts["emails"] += 1
+        except Exception as e:
+            print(f"[azure_db] Error purging emails in Cosmos: {e}")
+
+    if audit_container is not None:
+        try:
+            query = "SELECT c.id FROM c WHERE c.user_id = @uid"
+            params = [{"name": "@uid", "value": uid}]
+            items = list(audit_container.query_items(query=query, parameters=params, enable_cross_partition_query=False))
+            for it in items:
+                audit_container.delete_item(item=it["id"], partition_key=uid)
+                counts["audit"] += 1
+        except Exception as e:
+            print(f"[azure_db] Error purging audit in Cosmos: {e}")
+
+    # 2. Local Fallback deletion
+    data = _local_load()
+    for bucket in ("emails", "audit", "state"):
+        initial_len = len(data.get(bucket, []))
+        kept = [row for row in data.get(bucket, []) if row.get("user_id") != uid]
+        purged = initial_len - len(kept)
+        data[bucket] = kept
+        counts[bucket] = max(counts[bucket], purged)
+
+    _local_save(data)
+    return counts
 
 
 # =========================================================

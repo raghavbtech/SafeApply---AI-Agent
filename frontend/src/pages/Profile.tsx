@@ -510,6 +510,24 @@ export const Profile: React.FC = () => {
               </div>
             )}
 
+            {formData.resume_filename && (
+              <button
+                type="button"
+                onClick={async () => {
+                  if (window.confirm('Delete your uploaded resume file?')) {
+                    await api.deleteResume();
+                    setFormData((prev) => ({ ...prev, resume_filename: '', resume_path: '' }));
+                    queryClient.invalidateQueries({ queryKey: ['profile'] });
+                    setBannerMsg({ type: 'success', text: 'Resume file deleted successfully.' });
+                  }
+                }}
+                className="w-full py-2 px-3 rounded-lg border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 font-medium text-xs flex items-center justify-center gap-1.5 transition"
+              >
+                <X className="w-3.5 h-3.5" />
+                Remove Attached Resume
+              </button>
+            )}
+
             <div>
               <label className="block text-2xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
                 Upload New Resume (PDF, DOCX)
@@ -522,7 +540,7 @@ export const Profile: React.FC = () => {
                 <span className="text-2xs text-slate-500 mt-1">Up to 10MB</span>
                 <input
                   type="file"
-                  accept=".pdf,.docx,.doc"
+                  accept=".pdf,.docx,.doc,.txt"
                   onChange={handleFileChange}
                   disabled={uploadResumeMutation.isPending}
                   className="hidden"
@@ -540,6 +558,38 @@ export const Profile: React.FC = () => {
             <Save className="w-4 h-4" />
             {updateMutation.isPending ? 'Saving Profile...' : 'Save Profile & Update Matching'}
           </button>
+
+          {formData.full_name && (
+            <button
+              type="button"
+              onClick={async () => {
+                if (window.confirm('Clear all profile details and delete attached resume?')) {
+                  await api.deleteProfile();
+                  setFormData({
+                    full_name: '',
+                    email: '',
+                    phone: '',
+                    education: '',
+                    university: '',
+                    gpa: '',
+                    skills: [],
+                    experience: '',
+                    preferred_roles: [],
+                    target_locations: [],
+                    portfolio_url: '',
+                    linkedin_url: '',
+                    resume_filename: '',
+                    is_complete: false,
+                  });
+                  queryClient.invalidateQueries({ queryKey: ['profile'] });
+                  setBannerMsg({ type: 'success', text: 'Candidate profile and resume cleared.' });
+                }
+              }}
+              className="w-full py-2.5 px-3 rounded-xl border border-slate-700 bg-surface-raised hover:bg-slate-800 text-slate-400 hover:text-rose-400 text-xs font-medium transition flex items-center justify-center gap-1.5"
+            >
+              Clear Profile Information
+            </button>
+          )}
         </div>
       </form>
     </div>

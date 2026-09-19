@@ -1,28 +1,46 @@
-"""Authentication schemas."""
+"""
+Session and anonymous visitor schemas.
+"""
 
-from typing import Optional
-from pydantic import BaseModel, EmailStr, Field
-
-
-class LoginRequest(BaseModel):
-    email: str = Field(..., description="User email or identifier")
-    password: str = Field(..., description="User password")
+from typing import Dict, Optional
+from pydantic import BaseModel, Field
 
 
-class RegisterRequest(BaseModel):
-    email: str = Field(..., description="User email")
-    password: str = Field(..., min_length=6, description="User password")
-    full_name: str = Field(..., description="Full candidate name")
+class SessionPrincipal(BaseModel):
+    session_id: str
+    created_at: str
+    is_new: bool = False
+    full_name: Optional[str] = "Anonymous Candidate"
+
+    @property
+    def user_id(self) -> str:
+        """Alias for database partition key compatibility."""
+        return self.session_id
+
+    @property
+    def email(self) -> str:
+        return f"{self.session_id}@anonymous.safeapply.local"
+
+    @property
+    def role(self) -> str:
+        return "anonymous_candidate"
 
 
-class UserPrincipal(BaseModel):
-    user_id: str
-    email: str
-    full_name: Optional[str] = None
-    role: str = "candidate"
+# Backwards compatibility alias for components importing UserPrincipal
+UserPrincipal = SessionPrincipal
 
 
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    user: UserPrincipal
+class SessionStatusResponse(BaseModel):
+    session_id: str
+    created_at: str
+    expires_at: Optional[str] = None
+    has_profile: bool = False
+    has_resume: bool = False
+    has_mailbox: bool = False
+    storage_mode: str = "anonymous_session_isolated"
+
+
+class DataPurgeResponse(BaseModel):
+    success: bool = True
+    message: str = "All personal data, resumes, emails, and audit logs permanently deleted."
+    purged_items: Dict[str, int] = Field(default_factory=dict)

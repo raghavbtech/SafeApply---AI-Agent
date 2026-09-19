@@ -58,22 +58,26 @@ class RepositoryAdapter:
 
     @staticmethod
     def get_candidate_profile(user_id: str) -> Dict[str, Any]:
-        """User-scoped profile from persistent state, falling back to legacy profile file."""
+        """User-scoped profile from persistent state. Returns empty dict if not configured."""
         stored = azure_db.db_get_state("candidate_profile", default=None, user_id=user_id)
-        if stored and isinstance(stored, dict) and stored.get("full_name"):
+        if stored and isinstance(stored, dict):
             return stored
-        # Fallback to local profile loader
-        legacy = job_agent.load_candidate_profile()
-        return legacy
+        return {}
 
     @staticmethod
     def save_candidate_profile(profile: Dict[str, Any], user_id: str) -> None:
-        """Persist profile per-user in state, and update local file for backwards compatibility."""
+        """Persist profile per visitor session in state."""
         azure_db.db_set_state("candidate_profile", profile, user_id=user_id)
-        try:
-            job_agent.save_candidate_profile(profile)
-        except Exception:
-            pass
+
+    @staticmethod
+    def delete_candidate_profile(user_id: str) -> None:
+        """Erase candidate profile for this session."""
+        azure_db.db_set_state("candidate_profile", {}, user_id=user_id)
+
+    @staticmethod
+    def purge_user_data(user_id: str) -> Dict[str, int]:
+        """Purge all data (emails, audit, state, profile) for this user/session."""
+        return azure_db.db_purge_user_data(user_id=user_id)
 
     @staticmethod
     def get_preferences(user_id: str) -> Dict[str, Any]:

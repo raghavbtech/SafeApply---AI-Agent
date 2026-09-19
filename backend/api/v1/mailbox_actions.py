@@ -4,6 +4,7 @@ Mailbox connection, sync, and spam routing endpoints.
 
 from fastapi import APIRouter, Depends, Query
 from backend.schemas.mailbox import (
+    ConnectMailboxRequest,
     MailboxConnectionStatus,
     RestoreActionResponse,
     SpamActionRequest,
@@ -27,8 +28,23 @@ async def get_dashboard(current_user: UserPrincipal = Depends(get_current_user))
 
 @router.get("/mailboxes")
 async def get_mailboxes(current_user: UserPrincipal = Depends(get_current_user)):
-    info = MailProviderAdapter.get_connection_info()
+    info = MailProviderAdapter.get_connection_info(user_id=current_user.user_id)
     return info
+
+
+@router.post("/mailboxes/connect")
+async def connect_mailbox(
+    req: ConnectMailboxRequest,
+    current_user: UserPrincipal = Depends(get_current_user),
+):
+    info = MailProviderAdapter.connect_mailbox(user_id=current_user.user_id, creds=req.model_dump())
+    return {"success": True, "mailbox": info}
+
+
+@router.post("/mailboxes/disconnect")
+async def disconnect_mailbox(current_user: UserPrincipal = Depends(get_current_user)):
+    MailProviderAdapter.disconnect_mailbox(user_id=current_user.user_id)
+    return {"success": True, "message": "Mailbox disconnected and credentials removed."}
 
 
 @router.post("/mailboxes/sync", response_model=SyncMailboxResult)

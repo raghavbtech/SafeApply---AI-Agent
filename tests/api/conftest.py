@@ -4,24 +4,31 @@ import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 from backend.main import app
-from backend.schemas.auth import UserPrincipal
-from backend.security.identity import create_access_token
+from backend.schemas.auth import SessionPrincipal
+from backend.security.session import SessionStore
 
 
 @pytest.fixture
-def demo_principal() -> UserPrincipal:
-    return UserPrincipal(
-        user_id="test_candidate@safeapply.local",
-        email="test_candidate@safeapply.local",
-        full_name="Test Candidate",
-        role="candidate",
-    )
+def demo_session() -> tuple[SessionPrincipal, str]:
+    principal, raw_token = SessionStore.create_session(user_agent="pytest-client")
+    return principal, raw_token
 
 
 @pytest.fixture
-def auth_headers(demo_principal: UserPrincipal) -> dict:
-    token = create_access_token(demo_principal)
-    return {"Authorization": f"Bearer {token}"}
+def demo_principal(demo_session: tuple[SessionPrincipal, str]) -> SessionPrincipal:
+    return demo_session[0]
+
+
+@pytest.fixture
+def auth_headers(demo_session: tuple[SessionPrincipal, str]) -> dict:
+    raw_token = demo_session[1]
+    return {"Authorization": f"Bearer {raw_token}"}
+
+
+@pytest.fixture
+def session_cookies(demo_session: tuple[SessionPrincipal, str]) -> dict:
+    raw_token = demo_session[1]
+    return {"safeapply_session": raw_token}
 
 
 @pytest_asyncio.fixture

@@ -32,6 +32,10 @@ export const Settings: React.FC = () => {
 
   const [syncBatchSize, setSyncBatchSize] = useState<number>(15);
   const [bannerMsg, setBannerMsg] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
+  const [showConnectForm, setShowConnectForm] = useState(false);
+  const [connEmail, setConnEmail] = useState('');
+  const [connPass, setConnPass] = useState('');
+  const [connServer, setConnServer] = useState('imap.gmail.com');
 
   // Fetch Mailbox Status
   const { data: mailboxStatus, isLoading: isMailboxLoading } = useQuery<MailboxConnectionStatus>({
@@ -175,35 +179,111 @@ export const Settings: React.FC = () => {
               </div>
             </div>
 
-            {/* Sync Controls */}
-            <div className="pt-3 border-t border-border-subtle space-y-3">
-              <label className="text-2xs font-semibold uppercase tracking-wider text-slate-400 block">
-                Trigger Manual Mailbox Synchronization
-              </label>
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2 bg-surface-raised border border-border-subtle rounded-xl px-3 py-1.5 text-xs">
-                  <span className="text-slate-400 text-2xs">Fetch:</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={100}
-                    value={syncBatchSize}
-                    onChange={(e) => setSyncBatchSize(parseInt(e.target.value) || 15)}
-                    className="w-12 bg-transparent text-white text-center font-mono focus:outline-none"
-                  />
-                  <span className="text-slate-500 text-2xs">messages</span>
-                </div>
-
+            {/* Mailbox Connect / Disconnect Buttons */}
+            <div className="pt-3 border-t border-border-subtle flex flex-col gap-2">
+              {mailboxStatus?.is_connected ? (
                 <button
-                  onClick={() => syncMutation.mutate(syncBatchSize)}
-                  disabled={syncMutation.isPending}
-                  className="flex-1 py-2.5 px-4 rounded-xl bg-surface-raised border border-border-subtle hover:bg-slate-700 text-white font-medium text-xs transition-colors flex items-center justify-center gap-2 shadow-sm"
+                  type="button"
+                  onClick={async () => {
+                    if (window.confirm('Disconnect your mailbox and stop monitoring?')) {
+                      await api.disconnectMailbox();
+                      queryClient.invalidateQueries({ queryKey: ['mailbox-status'] });
+                      setBannerMsg({ type: 'warning', text: 'Mailbox disconnected and stored credentials removed.' });
+                    }
+                  }}
+                  className="w-full py-2 px-3 rounded-xl border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 font-medium text-xs transition"
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 ${syncMutation.isPending ? 'animate-spin text-neon-cyan' : ''}`} />
-                  {syncMutation.isPending ? 'Synchronizing Mailbox...' : 'Sync Mailbox Now'}
+                  Disconnect Mailbox & Stop Monitoring
                 </button>
-              </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowConnectForm(!showConnectForm)}
+                  className="w-full py-2 px-3 rounded-xl border border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 font-medium text-xs transition"
+                >
+                  {showConnectForm ? 'Cancel Connection' : '+ Connect Personal Mailbox (Gmail / IMAP)'}
+                </button>
+              )}
+
+              {showConnectForm && !mailboxStatus?.is_connected && (
+                <div className="p-3.5 rounded-xl bg-surface-raised border border-border-subtle space-y-2.5 text-xs">
+                  <span className="font-semibold text-white block">Connect Mailbox Credentials:</span>
+                  <input
+                    type="email"
+                    placeholder="your-email@gmail.com"
+                    value={connEmail}
+                    onChange={(e) => setConnEmail(e.target.value)}
+                    className="w-full px-3 py-1.5 rounded-lg bg-dark-900 border border-border-subtle text-white focus:outline-none focus:border-neon-cyan"
+                  />
+                  <input
+                    type="password"
+                    placeholder="App Password or Token"
+                    value={connPass}
+                    onChange={(e) => setConnPass(e.target.value)}
+                    className="w-full px-3 py-1.5 rounded-lg bg-dark-900 border border-border-subtle text-white focus:outline-none focus:border-neon-cyan"
+                  />
+                  <input
+                    type="text"
+                    placeholder="imap.gmail.com"
+                    value={connServer}
+                    onChange={(e) => setConnServer(e.target.value)}
+                    className="w-full px-3 py-1.5 rounded-lg bg-dark-900 border border-border-subtle text-white focus:outline-none focus:border-neon-cyan"
+                  />
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!connEmail || !connPass) {
+                        setBannerMsg({ type: 'error', text: 'Email and App Password are required.' });
+                        return;
+                      }
+                      await api.connectMailbox({
+                        username: connEmail,
+                        password_or_app_token: connPass,
+                        imap_server: connServer || 'imap.gmail.com',
+                      });
+                      setShowConnectForm(false);
+                      queryClient.invalidateQueries({ queryKey: ['mailbox-status'] });
+                      setBannerMsg({ type: 'success', text: 'Personal mailbox connected securely.' });
+                    }}
+                    className="w-full py-2 rounded-lg bg-neon-cyan text-black font-semibold text-xs"
+                  >
+                    Save & Authorize Mailbox Link
+                  </button>
+                </div>
+              )}
             </div>
+
+            {/* Sync Controls */}
+            {mailboxStatus?.is_connected && (
+              <div className="pt-3 border-t border-border-subtle space-y-3">
+                <label className="text-2xs font-semibold uppercase tracking-wider text-slate-400 block">
+                  Trigger Manual Mailbox Synchronization
+                </label>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 bg-surface-raised border border-border-subtle rounded-xl px-3 py-1.5 text-xs">
+                    <span className="text-slate-400 text-2xs">Fetch:</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={syncBatchSize}
+                      onChange={(e) => setSyncBatchSize(parseInt(e.target.value) || 15)}
+                      className="w-12 bg-transparent text-white text-center font-mono focus:outline-none"
+                    />
+                    <span className="text-slate-500 text-2xs">messages</span>
+                  </div>
+
+                  <button
+                    onClick={() => syncMutation.mutate(syncBatchSize)}
+                    disabled={syncMutation.isPending}
+                    className="flex-1 py-2.5 px-4 rounded-xl bg-surface-raised border border-border-subtle hover:bg-slate-700 text-white font-medium text-xs transition-colors flex items-center justify-center gap-2 shadow-sm"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${syncMutation.isPending ? 'animate-spin text-neon-cyan' : ''}`} />
+                    {syncMutation.isPending ? 'Synchronizing Mailbox...' : 'Sync Mailbox Now'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
