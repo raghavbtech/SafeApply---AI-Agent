@@ -38,3 +38,14 @@ candidate_profile.json
 uploads/
 *.db
 *.sqlite
+
+# Frontend & Web Artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+frontend/.env.*.local
+playwright-report/
+test-results/
+.coverage
+htmlcov/
+
