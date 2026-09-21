@@ -57,10 +57,8 @@ def _poll_loop(user_id: str):
                         applied = sum(1 for r in unscanned_results if r.get("applied"))
                         print(f"[background_sync] Auto-scanned {len(unscanned_results)} emails (quarantined: {quarantined}, applied: {applied}).")
 
-                    # Also ensure any safe, unapplied recruitment emails are auto-applied and responded to
-                    auto_applied = auto_apply_all_low_risk(user_id=user_id)
-                    if auto_applied:
-                        print(f"[background_sync] Auto-applied and dispatched response to {len(auto_applied)} opportunities.")
+                    # Note: Automatic job applications require human candidate confirmation
+                    # in accordance with Responsible AI principles. Auto-apply is not run silently.
         except Exception as exc:  # noqa: BLE001
             try:
                 print(f"[background_sync] poll warning: {repr(exc)}")

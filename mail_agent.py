@@ -11,6 +11,7 @@ Handles:
 import os
 import re
 import copy
+import html
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
@@ -30,10 +31,12 @@ from azure_db import (
 STRONG_RECRUITMENT_PATTERNS = [
     r"\boffer of internship\b",
     r"\boffer letter\b",
-    r"\bselection letter\b",
-    r"\bselected as\b",
     r"\binternship offer\b",
     r"\bjob offer\b",
+    r"\bselection letter\b",
+    r"\bselected as\b",
+    r"\bappointment letter\b",
+    r"\bletter of intent\b",
     r"\bhiring operations\b",
     r"\btalent acquisition\b",
     r"\brecruitment team\b",
@@ -42,11 +45,17 @@ STRONG_RECRUITMENT_PATTERNS = [
     r"\btechnical interview\b",
     r"\bshortlisted for\b",
     r"\bplacement slot\b",
-    r"\bctc\b",
-    r"\blpa\b",
-    r"\bstipend\b",
-    r"\bper annum\b",
-    r"\bper month\b",
+    r"\bctc\s*:\s*(?:inr|\u20b9|\$|rs\.?)\s*[\d,]+",
+    r"\bstipend\s*:\s*(?:inr|\u20b9|\$|rs\.?)\s*[\d,]+",
+    r"\bsalary\s*:\s*(?:inr|\u20b9|\$|rs\.?)\s*[\d,]+",
+    r"\bcongratulations on your selection\b",
+    r"\bwe are pleased to offer\b",
+    r"\byou have been selected\b",
+    r"\bwelcome to the team\b",
+    r"\bjoining date\b",
+    r"\bdate of joining\b",
+    r"\bemployment agreement\b",
+    r"\bemployment offer\b",
     r"\bdata entry specialist\b",
     r"\bwork from home \d+ hours\b",
     r"\bsoftware engineering intern\b",
@@ -81,6 +90,21 @@ NON_RECRUITMENT_PATTERNS = [
     r"\bpromotional discount\b",
     r"\bbilling update\b",
     r"\bpayment successful\b",
+    r"\bdelivery status notification\b",
+    r"\bmailer-daemon\b",
+    r"\btatacliq\b",
+    r"\bpuma\b",
+    r"\bdiscounts? louder than\b",
+    r"\bshop now\b",
+    r"\bflash sale\b",
+    r"\bbig bash\b",
+    r"\bcoupon\b",
+    r"\bcart\b",
+    r"\bcheckout\b",
+    r"\bundeliverable\b",
+    r"\breturned to sender\b",
+    r"\bpostmaster\b",
+    r"\bfailure notice\b",
 ]
 
 RECRUITMENT_KEYWORDS = [
@@ -173,7 +197,8 @@ def is_header_definitely_non_recruitment(subject: str, sender: str) -> bool:
         r"\bfinish setting up\b", r"\bbill due\b", r"\bstatement\b",
         r"\bnewsletter\b", r"\bweekly digest\b", r"\bunsubscribe\b",
         r"\bdependabot\b", r"\bpromotional discount\b", r"\bpayment successful\b",
-        r"tatacliq\.com", r"swiggy\.in", r"zomato\.com", r"flipkart\.com",
+        r"\bdelivery status notification\b", r"\bmailer-daemon\b", r"\bfailure\b",
+        r"tatacliq\.com", r"puma\.com", r"swiggy\.in", r"zomato\.com", r"flipkart\.com",
         r"myntra\.com", r"uber\.com", r"ola\.com", r"netflix\.com",
     ]
     return any(re.search(p, text) for p in non_rec_patterns)
@@ -426,11 +451,19 @@ def _extract_body_from_email_message(msg: email_pkg.message.Message) -> str:
                 payload = part.get_payload(decode=True)
                 if payload:
                     raw_html = payload.decode(part.get_content_charset() or "utf-8", errors="replace")
-                    body = re.sub(r"<[^>]+>", " ", raw_html)
+                    clean_html = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", raw_html, flags=re.DOTALL | re.IGNORECASE)
+                    clean_text = re.sub(r"<[^>]+>", " ", clean_html)
+                    body = html.unescape(clean_text)
     else:
         payload = msg.get_payload(decode=True)
         if payload:
-            body = payload.decode(msg.get_content_charset() or "utf-8", errors="replace")
+            raw_text = payload.decode(msg.get_content_charset() or "utf-8", errors="replace")
+            if "<html" in raw_text.lower() or "<body" in raw_text.lower():
+                clean_html = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", raw_text, flags=re.DOTALL | re.IGNORECASE)
+                clean_text = re.sub(r"<[^>]+>", " ", clean_html)
+                body = html.unescape(clean_text)
+            else:
+                body = html.unescape(raw_text)
 
     return re.sub(r"\s+", " ", body).strip()
 

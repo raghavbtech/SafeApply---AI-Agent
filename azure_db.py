@@ -340,15 +340,20 @@ def db_get_known_identifiers(user_id: str = DEFAULT_USER_ID) -> Tuple[Set[str], 
                 msg_id = item.get("message_id")
                 if msg_id:
                     known_msg_ids.add(str(msg_id).strip())
-            return known_uids, known_msg_ids
         except Exception as exc:  # noqa: BLE001
             print(f"[azure_db] known-identifiers query failed: {exc}")
+    else:
+        for r in _local_query("emails", user_id):
+            if r.get("imap_uid"):
+                known_uids.add(str(r["imap_uid"]).strip())
+            if r.get("message_id"):
+                known_msg_ids.add(str(r["message_id"]).strip())
 
-    for r in _local_query("emails", user_id):
-        if r.get("imap_uid"):
-            known_uids.add(str(r["imap_uid"]).strip())
-        if r.get("message_id"):
-            known_msg_ids.add(str(r["message_id"]).strip())
+    ignored = db_get_state("ignored_uids", default=[], user_id=user_id) or []
+    if isinstance(ignored, list):
+        for u in ignored:
+            if u:
+                known_uids.add(str(u).strip())
 
     return known_uids, known_msg_ids
 

@@ -391,6 +391,11 @@ def sync_mailbox_to_db(
                         skipped += 1
                         continue
 
+                    # Pre-filter: definite non-recruitment -> skip
+                    if is_header_definitely_non_recruitment(subj, sender):
+                        skipped += 1
+                        continue
+
                     candidate_uids.append(uid)
                     if len(candidate_uids) >= max_messages * 2:
                         break
@@ -419,9 +424,11 @@ def sync_mailbox_to_db(
                             continue
 
                         doc = parse_message(bytes(raw_bytes), uid, creds["provider"])
-                        if doc.get("is_recruitment"):
-                            recruitment += 1
+                        if not doc.get("is_recruitment"):
+                            skipped += 1
+                            continue
 
+                        recruitment += 1
                         to_store.append(doc)
                         if len(to_store) >= max_messages:
                             break

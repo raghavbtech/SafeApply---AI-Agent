@@ -55,19 +55,7 @@ class RepositoryAdapter:
 
     @staticmethod
     def get_applied_jobs(user_id: str) -> List[Dict[str, Any]]:
-        jobs = azure_db.db_get_applied_jobs(user_id=user_id)
-        if not jobs:
-            import os, json
-            fpath = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "applied_jobs.json")
-            if os.path.exists(fpath):
-                try:
-                    with open(fpath, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                        if isinstance(data, list) and data:
-                            return data
-                except Exception:
-                    pass
-        return jobs
+        return azure_db.db_get_applied_jobs(user_id=user_id)
 
     @staticmethod
     def get_candidate_profile(user_id: str) -> Dict[str, Any]:
