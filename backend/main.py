@@ -65,25 +65,34 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(api_v1_router)
 
-    from fastapi.responses import FileResponse
-    public_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "public")
+    # Serve React Frontend static assets & SPA index.html
+    dist_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
+    if os.path.exists(dist_dir):
+        assets_dir = os.path.join(dist_dir, "assets")
+        if os.path.exists(assets_dir):
+            app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
-    @app.get("/favicon.ico", include_in_schema=False)
-    async def favicon():
-        ico_file = os.path.join(public_dir, "favicon.ico")
-        if os.path.exists(ico_file):
-            return FileResponse(ico_file, media_type="image/x-icon")
-        return {"error": "favicon not found"}
-
-    @app.get("/", include_in_schema=False)
-    async def root():
-        return {
-            "name": settings.app_name,
-            "version": settings.app_version,
-            "status": "online",
-            "docs": "/docs",
-            "frontend": "http://localhost:5173",
-        }
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def serve_react_app(full_path: str):
+            if full_path.startswith("api/") or full_path.startswith("health/") or full_path in ("docs", "redoc", "openapi.json"):
+                return {"error": "Not Found"}
+            target = os.path.join(dist_dir, full_path)
+            if full_path and os.path.exists(target) and os.path.isfile(target):
+                return FileResponse(target)
+            index_file = os.path.join(dist_dir, "index.html")
+            if os.path.exists(index_file):
+                return FileResponse(index_file)
+            return {"name": settings.app_name, "version": settings.app_version, "docs": "/docs"}
+    else:
+        @app.get("/", include_in_schema=False)
+        async def root():
+            return {
+                "name": settings.app_name,
+                "version": settings.app_version,
+                "status": "online",
+                "docs": "/docs",
+                "notice": "React frontend not built yet. Run 'npm run build' in /frontend directory.",
+            }
 
     # Ensure uploads directory exists
     uploads_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")

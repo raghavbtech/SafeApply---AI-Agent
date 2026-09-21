@@ -1,5 +1,4 @@
 #!/bin/bash
-# Azure App Service Startup Script for SafeApply
+# Azure App Service Startup Script for SafeApply (React 18 Frontend + FastAPI Backend)
 
-# Streamlit Interface (Port 8000 for Azure App Service)
-streamlit run app.py --server.port 8000 --server.address 0.0.0.0
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
