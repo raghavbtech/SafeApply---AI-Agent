@@ -72,9 +72,9 @@ export const AppShell: React.FC = () => {
   return (
     <div className="flex min-h-screen bg-dark-950 text-slate-100">
       <Sidebar />
-      <div className="flex flex-1 flex-col pl-64">
+      <div className="flex flex-1 flex-col pl-64 min-w-0 overflow-x-hidden">
         <Header title={currentMeta.title} subtitle={currentMeta.subtitle} />
-        <main className="flex-1 p-8">
+        <main className="flex-1 p-8 min-w-0 max-w-full">
           <Outlet />
         </main>
       </div>

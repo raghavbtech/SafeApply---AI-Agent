@@ -302,7 +302,7 @@ export const Inbox: React.FC = () => {
       {/* Two-Pane Workspace */}
       <div className="flex h-[calc(100vh-12rem)] gap-5 overflow-hidden">
         {/* LEFT COLUMN: Message List */}
-        <div className="flex w-2/5 flex-col rounded-2xl border border-slate-800/80 bg-dark-900/60 backdrop-blur-xl">
+        <div className="flex w-[380px] shrink-0 min-w-0 flex-col rounded-2xl border border-slate-800/80 bg-dark-900/60 backdrop-blur-xl">
           {/* List Header & Filters */}
           <div className="border-b border-slate-800 p-3.5 space-y-2.5">
             <div className="flex items-center justify-between">
@@ -375,9 +375,9 @@ export const Inbox: React.FC = () => {
                         : 'border-slate-800/80 bg-dark-850/40 hover:border-slate-700 hover:bg-dark-850/80'
                     )}
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-2xs font-semibold text-slate-500 truncate">{em.date || em.id}</span>
-                      <RiskBadge level={em.risk_level} score={em.risk_score} status={em.status} />
+                    <div className="flex items-center justify-between gap-2 min-w-0">
+                      <span className="text-2xs font-semibold text-slate-500 truncate min-w-0 flex-1">{em.date || em.id}</span>
+                      <div className="shrink-0"><RiskBadge level={em.risk_level} score={em.risk_score} status={em.status} /></div>
                     </div>
 
                     <h4 className="mt-1 text-xs font-bold text-white truncate">{em.subject}</h4>
@@ -395,7 +395,7 @@ export const Inbox: React.FC = () => {
         </div>
 
         {/* RIGHT COLUMN: Dossier View, Verification & 4-Pillars */}
-        <div className="flex w-3/5 flex-col rounded-2xl border border-slate-800/80 bg-dark-900/60 backdrop-blur-xl overflow-y-auto p-5 space-y-5">
+        <div className="flex flex-1 min-w-0 flex-col rounded-2xl border border-slate-800/80 bg-dark-900/60 backdrop-blur-xl overflow-y-auto p-5 space-y-5">
           {detailLoading ? (
             <Loading message="Loading offer dossier & risk assessment..." />
           ) : !selectedEmail ? (
@@ -679,7 +679,7 @@ export const Inbox: React.FC = () => {
               {/* Original Message Body */}
               <div className="rounded-xl border border-slate-800 bg-dark-850/30 p-3.5 space-y-2">
                 <span className="text-2xs font-bold uppercase tracking-wider text-slate-400">Message Content</span>
-                <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap rounded-lg bg-dark-950 p-3 font-mono text-[11px] text-slate-300">
+                <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap break-words overflow-x-hidden rounded-lg bg-dark-950 p-3 font-mono text-[11px] text-slate-300 max-w-full">
                   {selectedEmail.body}
                 </pre>
               </div>
