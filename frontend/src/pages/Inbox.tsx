@@ -95,13 +95,13 @@ export const Inbox: React.FC = () => {
           status,
           risk_level: riskLevel,
           search: searchKeyword || undefined,
-          limit: 100,
+          limit: 10,
         });
       } else {
         return api.listEmails({
           folder: 'spam',
           search: searchKeyword || undefined,
-          limit: 100,
+          limit: 50,
         });
       }
     },
@@ -246,7 +246,7 @@ export const Inbox: React.FC = () => {
             My Mailbox
           </h1>
           <p className="text-xs text-slate-400">
-            Synchronize, review incoming recruitment offers, verify ambiguous signals, and isolate threats.
+            Synchronize, review top 10 incoming mailbox messages, verify ambiguous signals, and isolate threats.
           </p>
         </div>
 
@@ -307,9 +307,11 @@ export const Inbox: React.FC = () => {
           <div className="border-b border-slate-800 p-3.5 space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-300">
-                {mainView === 'inbox' ? 'Recruitment Messages' : 'Isolated Threats Vault'}
+                {mainView === 'inbox' ? 'Top 10 Inbox Messages' : 'Isolated Threats Vault'}
               </span>
-              <span className="text-2xs font-mono text-slate-500">{emails.length} items</span>
+              <span className="text-2xs font-mono text-slate-500">
+                {emails.length} {mainView === 'inbox' ? 'messages (Top 10)' : 'items'}
+              </span>
             </div>
 
             {/* Search Input */}

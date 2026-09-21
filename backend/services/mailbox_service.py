@@ -3,6 +3,7 @@ Mailbox management, email listing, and inbox ingestion service.
 """
 
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Optional
 from backend.errors import NotFoundError, ValidationError
 from backend.schemas.emails import EmailDetailResponse, EmailListItem, EmlImportResponse
@@ -26,10 +27,15 @@ class MailboxService:
     ) -> Dict[str, Any]:
         raw_emails = RepositoryAdapter.fetch_all_emails(user_id=user_id, folder=folder, status=status)
 
-        # In-memory filtering for risk_level & search
+        # In-memory filtering: filter out any synthetic/dummy emails
         filtered = []
         for em in raw_emails:
+            em_id = str(em.get("id") or "")
+            if em_id.startswith("EML-") or "dummy" in em_id.lower():
+                continue
             if risk_level and em.get("risk_level") != risk_level:
+                continue
+            if status and em.get("status") != status:
                 continue
             if search:
                 term = search.lower()
@@ -39,6 +45,27 @@ class MailboxService:
                 if term not in subj and term not in sender and term not in comp:
                     continue
             filtered.append(em)
+
+        # Chronological sort: newest emails first based on parsed RFC 2822 / ISO date
+        def _parse_email_date(em: Dict[str, Any]) -> float:
+            d_str = em.get("date") or em.get("synced_at") or ""
+            if not d_str:
+                return 0.0
+            try:
+                return parsedate_to_datetime(d_str).timestamp()
+            except Exception:
+                pass
+            try:
+                return datetime.fromisoformat(d_str.replace("Z", "+00:00")).timestamp()
+            except Exception:
+                pass
+            return 0.0
+
+        filtered.sort(key=_parse_email_date, reverse=True)
+
+        # For the active inbox, strictly show the top 10 newest emails
+        if folder == "inbox":
+            filtered = filtered[:10]
 
         total = len(filtered)
         paginated = filtered[offset : offset + limit]
@@ -52,7 +79,7 @@ class MailboxService:
                 sender_name=em.get("sender_name"),
                 subject=em.get("subject", "(no subject)"),
                 date=em.get("date"),
-                company_name=em.get("company_name", "Unknown"),
+                company_name=em.get("company_name") or em.get("sender_name") or "Unknown",
                 role_title=em.get("role_title", "Not Specified"),
                 status=em.get("status", "unscanned"),
                 folder=em.get("folder", "inbox"),

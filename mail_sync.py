@@ -337,10 +337,10 @@ def sync_mailbox_to_db(
         window.reverse()  # newest first
         raw_uid_strs = [u.decode() if isinstance(u, bytes) else str(u) for u in window]
 
-        # Fast local pre-filtering: skip already-stored AND previously inspected non-recruitment messages BEFORE network fetch
+        # Fast local pre-filtering: skip already-stored messages BEFORE network fetch
         uid_strs = [
             u for u in raw_uid_strs
-            if u not in known_uids and u not in _known_non_recruitment_uids
+            if u not in known_uids
         ]
         skipped += (len(raw_uid_strs) - len(uid_strs))
 
@@ -384,23 +384,10 @@ def sync_mailbox_to_db(
                         skipped += 1
                         continue
 
-                    # Pre-filter: self-sent message / candidate's own email -> skip and never ingest
+                    # Pre-filter: self-sent message / candidate's own email -> skip
                     match = re.search(r"<([^>]+)>", sender)
                     sender_email = match.group(1).strip() if match else sender.strip()
                     if creds["username"] and sender_email.lower() == creds["username"].lower():
-                        _known_non_recruitment_uids.add(str(uid))
-                        skipped += 1
-                        continue
-
-                    subj_lower = subj.lower()
-                    if "re: application" in subj_lower or "candidate profile" in subj_lower:
-                        _known_non_recruitment_uids.add(str(uid))
-                        skipped += 1
-                        continue
-
-                    # Pre-filter: definite non-recruitment -> record in memory and skip
-                    if is_header_definitely_non_recruitment(subj, sender):
-                        _known_non_recruitment_uids.add(str(uid))
                         skipped += 1
                         continue
 
@@ -411,7 +398,7 @@ def sync_mailbox_to_db(
             if len(candidate_uids) >= max_messages * 2:
                 break
 
-        # Tier 2: Targeted batch fetch for Candidate bodies (chunks of 15)
+        # Tier 2: Targeted batch fetch for bodies (chunks of 15)
         if candidate_uids:
             c_chunk_size = 15
             for i in range(0, len(candidate_uids), c_chunk_size):
@@ -432,13 +419,9 @@ def sync_mailbox_to_db(
                             continue
 
                         doc = parse_message(bytes(raw_bytes), uid, creds["provider"])
-                        if not doc["is_recruitment"]:
-                            if uid:
-                                _known_non_recruitment_uids.add(str(uid))
-                            skipped += 1
-                            continue
+                        if doc.get("is_recruitment"):
+                            recruitment += 1
 
-                        recruitment += 1
                         to_store.append(doc)
                         if len(to_store) >= max_messages:
                             break
