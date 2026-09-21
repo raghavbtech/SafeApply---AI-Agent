@@ -176,13 +176,22 @@ git clone https://github.com/raghavbtech/SafeApply---AI-Agent.git
 cd SafeApply---AI-Agent
 ```
 
-### 3. Setup Python Backend Environment
+### 3. Setup Python Virtual Environment & Dependencies
 ```powershell
-# Install Python dependencies
-pip install -r requirements.txt
+# 1. Create a Python virtual environment
+python -m venv venv
 
-# Configure environment credentials
-Copy-Item .env.example .env
+# 2. Activate the virtual environment
+# On Windows PowerShell:
+.\venv\Scripts\Activate.ps1
+# On Windows Command Prompt:
+.\venv\Scripts\activate.bat
+# On Linux / macOS:
+source venv/bin/activate
+
+# 3. Upgrade pip and install Python dependencies
+python -m pip install --upgrade pip
+pip install -r requirements.txt
 ```
 
 Configure `.env` with your Azure credentials (or leave defaults for local fallback mode):
