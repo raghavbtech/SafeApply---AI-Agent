@@ -152,10 +152,17 @@ export const Inbox: React.FC = () => {
   const syncMutation = useMutation({
     mutationFn: () => api.syncMailbox(15),
     onSuccess: (res) => {
-      setBannerMsg({
-        type: 'success',
-        text: `Mailbox synchronized: inspected ${res.inspected || 0} messages (${res.new_stored || 0} new recruitment offers).`
-      });
+      if (res.ok === false || res.error) {
+        setBannerMsg({
+          type: 'warning',
+          text: `Mailbox sync warning: ${res.error || 'Unable to fetch recent messages.'}`
+        });
+      } else {
+        setBannerMsg({
+          type: 'success',
+          text: `Mailbox synchronized: inspected ${res.inspected || 0} messages (${res.new_stored || 0} new recruitment offers).`
+        });
+      }
       queryClient.invalidateQueries({ queryKey: ['emails'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     },

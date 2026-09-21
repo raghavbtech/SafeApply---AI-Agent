@@ -94,6 +94,9 @@ class MailProviderAdapter:
         Never returns raw or encrypted passwords to the frontend or API callers.
         """
         effective_uid = user_id or settings.safeapply_user_id or azure_db.DEFAULT_USER_ID
+        last_sync_record = azure_db.db_get_state("last_sync", default=None, user_id=effective_uid)
+        last_sync_at = last_sync_record.get("at") if isinstance(last_sync_record, dict) else None
+
         if effective_uid:
             auth = azure_db.db_get_state("mailbox_auth", default=None, user_id=effective_uid)
             if auth and isinstance(auth, dict):
@@ -105,7 +108,7 @@ class MailProviderAdapter:
                         "status": "connected",
                         "imap_server": auth.get("imap_server", "imap.gmail.com"),
                         "imap_port": auth.get("imap_port", 993),
-                        "last_sync": auth.get("last_sync"),
+                        "last_sync": auth.get("last_sync") or last_sync_at,
                         "stored_count": len(azure_db.db_fetch_all_emails(user_id=effective_uid)),
                     }
                 elif auth.get("is_connected") is False:
@@ -132,7 +135,7 @@ class MailProviderAdapter:
                 "status": "connected",
                 "imap_server": settings.mail_imap_server or "imap.gmail.com",
                 "imap_port": settings.mail_imap_port or 993,
-                "last_sync": None,
+                "last_sync": last_sync_at,
                 "stored_count": stored_count,
             }
 
@@ -175,22 +178,33 @@ class MailProviderAdapter:
             # Fallback to .env for the default admin user
             is_default_admin = (not user_id) or (user_id == settings.safeapply_user_id) or (user_id == azure_db.DEFAULT_USER_ID)
             if is_default_admin and settings.environment != "testing" and settings.mail_username and settings.mail_app_password:
+                server = settings.mail_imap_server or "imap.gmail.com"
+                port = int(settings.mail_imap_port or 993)
+                pwd = settings.mail_app_password
                 return {
                     "provider": settings.mail_provider or "Gmail",
                     "username": settings.mail_username,
-                    "password_or_token": settings.mail_app_password,
-                    "imap_server": settings.mail_imap_server or "imap.gmail.com",
-                    "imap_port": settings.mail_imap_port or 993,
+                    "password": pwd,
+                    "password_or_token": pwd,
+                    "server": server,
+                    "imap_server": server,
+                    "port": port,
+                    "imap_port": port,
                 }
             return None
         enc = auth.get("encrypted_password_or_token") or auth.get("password_or_token", "")
         token = decrypt_credential(enc)
+        server = auth.get("imap_server") or auth.get("server") or "imap.gmail.com"
+        port = int(auth.get("imap_port") or auth.get("port") or 993)
         return {
             "provider": auth.get("provider", "Gmail"),
             "username": auth.get("username", ""),
+            "password": token,
             "password_or_token": token,
-            "imap_server": auth.get("imap_server", "imap.gmail.com"),
-            "imap_port": auth.get("imap_port", 993),
+            "server": server,
+            "imap_server": server,
+            "port": port,
+            "imap_port": port,
         }
 
     @staticmethod
@@ -206,10 +220,36 @@ class MailProviderAdapter:
     @staticmethod
     def sync_mailbox(user_id: str, max_messages: int = 15) -> Dict[str, Any]:
         creds = MailProviderAdapter.get_decrypted_credentials(user_id)
-        res = mail_sync.sync_mailbox_to_db(max_messages=max_messages, user_id=user_id, credentials=creds)
-        if "new_stored" not in res and "stored" in res:
-            res["new_stored"] = res["stored"]
-        return res
+        if not creds or not (creds.get("password") or creds.get("password_or_token")):
+            return {
+                "ok": False,
+                "error": "Mailbox credentials are not configured or session is disconnected.",
+                "inspected": 0,
+                "recruitment": 0,
+                "new_stored": 0,
+                "stored": 0,
+                "skipped": 0,
+            }
+        try:
+            res = mail_sync.sync_mailbox_to_db(max_messages=max_messages, user_id=user_id, credentials=creds)
+            if "new_stored" not in res and "stored" in res:
+                res["new_stored"] = res["stored"]
+            # Update last_sync in mailbox_auth if connected
+            auth = azure_db.db_get_state("mailbox_auth", default=None, user_id=user_id)
+            if auth and isinstance(auth, dict) and auth.get("is_connected"):
+                auth["last_sync"] = datetime.now(timezone.utc).isoformat()
+                azure_db.db_set_state("mailbox_auth", auth, user_id=user_id)
+            return res
+        except Exception as e:
+            return {
+                "ok": False,
+                "error": f"Mailbox sync error: {e}",
+                "inspected": 0,
+                "recruitment": 0,
+                "new_stored": 0,
+                "stored": 0,
+                "skipped": 0,
+            }
 
     @staticmethod
     def move_to_spam(email_id: str, reason: str, user_id: str, automated: bool = False) -> Dict[str, Any]:

@@ -98,10 +98,17 @@ export const Settings: React.FC = () => {
   const syncMutation = useMutation({
     mutationFn: (count: number) => api.syncMailbox(count),
     onSuccess: (res) => {
-      setBannerMsg({
-        type: 'success',
-        text: `Mailbox sync completed! Inspected ${res.inspected} messages, found ${res.recruitment} recruitment opportunities (${res.new_stored} new).`
-      });
+      if (res.ok === false || res.error) {
+        setBannerMsg({
+          type: 'warning',
+          text: `Mailbox sync warning: ${res.error || 'Unable to complete mailbox sync.'}`
+        });
+      } else {
+        setBannerMsg({
+          type: 'success',
+          text: `Mailbox sync completed! Inspected ${res.inspected || 0} messages, found ${res.recruitment || 0} recruitment opportunities (${res.new_stored || 0} new).`
+        });
+      }
       queryClient.invalidateQueries({ queryKey: ['mailbox-status'] });
       queryClient.invalidateQueries({ queryKey: ['emails'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });

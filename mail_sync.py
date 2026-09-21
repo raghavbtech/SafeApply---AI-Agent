@@ -272,13 +272,32 @@ def sync_mailbox_to_db(
     4. Persists verified recruitment emails to Cosmos DB.
     """
     global _cached_known_uids, _cached_known_msg_ids, _cache_last_refresh
-    creds = credentials or get_mail_credentials()
+    creds_raw = credentials or get_mail_credentials()
+    username = (creds_raw.get("username") or "").strip()
+    password = (creds_raw.get("password") or creds_raw.get("password_or_token") or "").strip()
+    provider = (creds_raw.get("provider") or "Gmail").strip()
+    server = (creds_raw.get("server") or creds_raw.get("imap_server") or "").strip() or None
+    port = int(creds_raw.get("port") or creds_raw.get("imap_port") or 993)
+
+    if provider == "Gmail":
+        password = password.replace(" ", "")
+
+    creds = {
+        "username": username,
+        "password": password,
+        "password_or_token": password,
+        "provider": provider,
+        "server": server,
+        "imap_server": server,
+        "port": port,
+        "imap_port": port,
+    }
 
     if not creds["username"] or not creds["password"]:
         return {
             "ok": False,
             "error": "Mailbox credentials are not set. Add MAIL_USERNAME and "
-                     "MAIL_APP_PASSWORD to your .env file.",
+                     "MAIL_APP_PASSWORD to your .env file or connect your mailbox in Settings.",
             "inspected": 0, "recruitment": 0, "stored": 0, "skipped": 0,
         }
 
