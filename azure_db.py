@@ -387,6 +387,26 @@ def db_update_email_status(
     return db_update_email_fields(doc_id, {"status": new_status}, user_id)
 
 
+def db_delete_email(doc_id: str, user_id: str = DEFAULT_USER_ID) -> bool:
+    """Delete a single email document from Cosmos DB and local storage."""
+    container = _get_container(COSMOS_EMAIL_CONTAINER)
+    deleted = False
+    if container is not None:
+        try:
+            container.delete_item(item=doc_id, partition_key=user_id)
+            deleted = True
+        except Exception:
+            pass
+
+    data = _local_load()
+    orig_len = len(data.get("emails", []))
+    data["emails"] = [e for e in data.get("emails", []) if not (e.get("id") == doc_id and e.get("user_id") == user_id)]
+    if len(data.get("emails", [])) < orig_len:
+        deleted = True
+    _local_save(data)
+    return deleted
+
+
 def db_mailbox_stats(user_id: str = DEFAULT_USER_ID) -> Dict[str, int]:
     """Counts used by the metric row in the Streamlit UI."""
     rows = db_fetch_all_emails(user_id)

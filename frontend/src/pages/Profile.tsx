@@ -47,6 +47,33 @@ export const Profile: React.FC = () => {
   const [newLocation, setNewLocation] = useState('');
   const [bannerMsg, setBannerMsg] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
 
+  const isDirtyRef = React.useRef(false);
+
+  const handleInputChange = (field: keyof CandidateProfileSchema, value: any) => {
+    isDirtyRef.current = true;
+    setFormData((prev) => ({ ...prev, [field]: value }));
+    if (field === 'full_name') {
+      // Instantly render typed name on the top right corner and across app
+      queryClient.setQueryData(['profile'], (old: any) => ({
+        ...(old || {}),
+        full_name: value,
+      }));
+    }
+  };
+
+  const handleFullNameBlur = async () => {
+    const trimmed = formData.full_name?.trim();
+    if (trimmed && isDirtyRef.current) {
+      try {
+        await api.updateProfile(formData);
+        isDirtyRef.current = false;
+        queryClient.invalidateQueries({ queryKey: ['profile'] });
+      } catch (err) {
+        console.warn('Silent auto-update of candidate profile on blur:', err);
+      }
+    }
+  };
+
   const { data: profile, isLoading } = useQuery<CandidateProfileSchema>({
     queryKey: ['profile'],
     queryFn: () => api.getProfile(),
@@ -54,13 +81,25 @@ export const Profile: React.FC = () => {
 
   useEffect(() => {
     if (profile) {
-      setFormData(profile);
+      setFormData((prev) => {
+        // If the user has unsaved edits in the form, preserve their inputs and only merge server fields
+        if (isDirtyRef.current) {
+          return {
+            ...profile,
+            ...prev,
+            resume_filename: profile.resume_filename || prev.resume_filename,
+            resume_path: profile.resume_path || prev.resume_path,
+          };
+        }
+        return profile;
+      });
     }
   }, [profile]);
 
   const updateMutation = useMutation({
     mutationFn: (updated: CandidateProfileSchema) => api.updateProfile(updated),
     onSuccess: (data) => {
+      isDirtyRef.current = false;
       setFormData(data);
       setBannerMsg({
         type: 'success',
@@ -77,12 +116,27 @@ export const Profile: React.FC = () => {
   });
 
   const uploadResumeMutation = useMutation({
-    mutationFn: (file: File) => api.uploadResume(file),
+    mutationFn: async (file: File) => {
+      // Auto-save candidate details first so the backend updates candidate_profile before attaching resume
+      const hasUserData = Boolean(
+        formData.full_name || formData.email || formData.phone || formData.education ||
+        formData.university || formData.gpa || formData.experience || formData.skills.length > 0
+      );
+      if (hasUserData) {
+        try {
+          await api.updateProfile(formData);
+          isDirtyRef.current = false;
+        } catch (e) {
+          console.warn('Could not auto-save candidate profile before resume upload:', e);
+        }
+      }
+      return api.uploadResume(file);
+    },
     onSuccess: (data) => {
       setFormData((prev) => ({ ...prev, resume_filename: data.filename }));
       setBannerMsg({
         type: 'success',
-        text: `Resume ${data.filename} uploaded and parsed successfully!`
+        text: `Resume "${data.filename}" uploaded and attached to profile successfully!`
       });
       queryClient.invalidateQueries({ queryKey: ['profile'] });
     },
@@ -98,12 +152,14 @@ export const Profile: React.FC = () => {
     if (e) e.preventDefault();
     const s = newSkill.trim();
     if (s && !formData.skills.includes(s)) {
+      isDirtyRef.current = true;
       setFormData((prev) => ({ ...prev, skills: [...prev.skills, s] }));
       setNewSkill('');
     }
   };
 
   const handleRemoveSkill = (skillToRemove: string) => {
+    isDirtyRef.current = true;
     setFormData((prev) => ({
       ...prev,
       skills: prev.skills.filter((s) => s !== skillToRemove),
@@ -114,12 +170,14 @@ export const Profile: React.FC = () => {
     if (e) e.preventDefault();
     const r = newRole.trim();
     if (r && !formData.preferred_roles.includes(r)) {
+      isDirtyRef.current = true;
       setFormData((prev) => ({ ...prev, preferred_roles: [...prev.preferred_roles, r] }));
       setNewRole('');
     }
   };
 
   const handleRemoveRole = (roleToRemove: string) => {
+    isDirtyRef.current = true;
     setFormData((prev) => ({
       ...prev,
       preferred_roles: prev.preferred_roles.filter((r) => r !== roleToRemove),
@@ -130,12 +188,14 @@ export const Profile: React.FC = () => {
     if (e) e.preventDefault();
     const loc = newLocation.trim();
     if (loc && !formData.target_locations.includes(loc)) {
+      isDirtyRef.current = true;
       setFormData((prev) => ({ ...prev, target_locations: [...prev.target_locations, loc] }));
       setNewLocation('');
     }
   };
 
   const handleRemoveLocation = (locToRemove: string) => {
+    isDirtyRef.current = true;
     setFormData((prev) => ({
       ...prev,
       target_locations: prev.target_locations.filter((l) => l !== locToRemove),
@@ -225,7 +285,8 @@ export const Profile: React.FC = () => {
                     type="text"
                     required
                     value={formData.full_name}
-                    onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
+                    onChange={(e) => handleInputChange('full_name', e.target.value)}
+                    onBlur={handleFullNameBlur}
                     placeholder="Jane Doe"
                     className="w-full pl-9 pr-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan font-medium"
                   />
@@ -240,7 +301,7 @@ export const Profile: React.FC = () => {
                     type="email"
                     required
                     value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    onChange={(e) => handleInputChange('email', e.target.value)}
                     placeholder="jane.doe@example.com"
                     className="w-full pl-9 pr-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan font-medium"
                   />
@@ -254,7 +315,7 @@ export const Profile: React.FC = () => {
                   <input
                     type="text"
                     value={formData.phone || ''}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                    onChange={(e) => handleInputChange('phone', e.target.value)}
                     placeholder="+1 (555) 019-2834"
                     className="w-full pl-9 pr-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan font-medium"
                   />
@@ -268,7 +329,7 @@ export const Profile: React.FC = () => {
                   <input
                     type="text"
                     value={formData.experience || ''}
-                    onChange={(e) => setFormData({ ...formData, experience: e.target.value })}
+                    onChange={(e) => handleInputChange('experience', e.target.value)}
                     placeholder="e.g. 5+ years"
                     className="w-full pl-9 pr-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan font-medium"
                   />
@@ -284,7 +345,7 @@ export const Profile: React.FC = () => {
                   <input
                     type="url"
                     value={formData.linkedin_url || ''}
-                    onChange={(e) => setFormData({ ...formData, linkedin_url: e.target.value })}
+                    onChange={(e) => handleInputChange('linkedin_url', e.target.value)}
                     placeholder="https://linkedin.com/in/janedoe"
                     className="w-full pl-9 pr-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan font-medium"
                   />
@@ -298,7 +359,7 @@ export const Profile: React.FC = () => {
                   <input
                     type="url"
                     value={formData.portfolio_url || ''}
-                    onChange={(e) => setFormData({ ...formData, portfolio_url: e.target.value })}
+                    onChange={(e) => handleInputChange('portfolio_url', e.target.value)}
                     placeholder="https://github.com/janedoe"
                     className="w-full pl-9 pr-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan font-medium"
                   />
@@ -320,7 +381,7 @@ export const Profile: React.FC = () => {
                 <input
                   type="text"
                   value={formData.education || ''}
-                  onChange={(e) => setFormData({ ...formData, education: e.target.value })}
+                  onChange={(e) => handleInputChange('education', e.target.value)}
                   placeholder="B.S. in Computer Science"
                   className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-violet focus:ring-1 focus:ring-neon-violet font-medium"
                 />
@@ -331,7 +392,7 @@ export const Profile: React.FC = () => {
                 <input
                   type="text"
                   value={formData.university || ''}
-                  onChange={(e) => setFormData({ ...formData, university: e.target.value })}
+                  onChange={(e) => handleInputChange('university', e.target.value)}
                   placeholder="University of Washington"
                   className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-violet focus:ring-1 focus:ring-neon-violet font-medium"
                 />
@@ -342,7 +403,7 @@ export const Profile: React.FC = () => {
                 <input
                   type="text"
                   value={formData.gpa || ''}
-                  onChange={(e) => setFormData({ ...formData, gpa: e.target.value })}
+                  onChange={(e) => handleInputChange('gpa', e.target.value)}
                   placeholder="3.85"
                   className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-violet focus:ring-1 focus:ring-neon-violet font-medium"
                 />
@@ -566,6 +627,22 @@ export const Profile: React.FC = () => {
                 if (window.confirm('Clear all profile details and delete attached resume?')) {
                   await api.deleteProfile();
                   setFormData({
+                    full_name: '',
+                    email: '',
+                    phone: '',
+                    education: '',
+                    university: '',
+                    gpa: '',
+                    skills: [],
+                    experience: '',
+                    preferred_roles: [],
+                    target_locations: [],
+                    portfolio_url: '',
+                    linkedin_url: '',
+                    resume_filename: '',
+                    is_complete: false,
+                  });
+                  queryClient.setQueryData(['profile'], {
                     full_name: '',
                     email: '',
                     phone: '',

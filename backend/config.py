@@ -36,6 +36,7 @@ class Settings(BaseSettings):
         default="http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000",
         alias="SAFEAPPLY_CORS_ORIGINS",
     )
+    safeapply_user_id: str = Field(default="", alias="SAFEAPPLY_USER_ID")
 
     # Persistence & Durable Storage
     cosmos_endpoint: str = Field(default="", alias="COSMOS_ENDPOINT")

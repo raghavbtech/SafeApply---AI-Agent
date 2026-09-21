@@ -37,14 +37,20 @@ class SessionPrincipal(BaseModel):
     @property
     def user_id(self) -> str:
         """Alias for database partition key compatibility."""
+        if settings.safeapply_user_id and settings.environment != "testing":
+            return settings.safeapply_user_id
         return self.session_id
 
     @property
     def email(self) -> str:
+        if settings.safeapply_user_id:
+            return settings.safeapply_user_id
         return f"{self.session_id}@anonymous.safeapply.local"
 
     @property
     def full_name(self) -> str:
+        if settings.safeapply_user_id:
+            return "Verified Candidate"
         return "Anonymous Candidate"
 
     @property

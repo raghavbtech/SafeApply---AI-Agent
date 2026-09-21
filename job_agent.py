@@ -105,8 +105,20 @@ def is_candidate_profile_complete(profile: Optional[Dict[str, Any]]) -> bool:
     return False
 
 
-def load_candidate_profile() -> Dict[str, Any]:
-    """Load the candidate profile from local storage, or an empty scaffold."""
+def load_candidate_profile(user_id: Optional[str] = None) -> Dict[str, Any]:
+    """Load the candidate profile from persistent database state, or local storage."""
+    uid = user_id or os.getenv("SAFEAPPLY_USER_ID", "").strip()
+    if uid:
+        try:
+            from azure_db import db_get_state
+            stored = db_get_state("candidate_profile", default=None, user_id=uid)
+            if stored and isinstance(stored, dict) and any(stored.values()):
+                merged = dict(EMPTY_CANDIDATE_PROFILE)
+                merged.update(stored)
+                return merged
+        except Exception:
+            pass
+
     if os.path.exists(PROFILE_FILE):
         try:
             with open(PROFILE_FILE, "r", encoding="utf-8") as f:
@@ -222,8 +234,9 @@ def extract_job_spec(offer_text: str, email_data: Optional[Dict[str, Any]] = Non
     sender_email = (email_data.get("sender") or "").strip()
     cand_email = (load_candidate_profile().get("email") or "").strip().lower()
 
-    ignored_domains = ("example.com", "domain.com", "localhost", "w3.org", "schema.org")
+    ignored_domains = ("example.com", "domain.com", "localhost", "w3.org", "schema.org", "2x.png", "3x.png", "1x.png")
     ignored_prefixes = ("support@", "info@", "help@", "privacy@", "admin@", "unsubscribe@", "notifications@", "no-reply@", "noreply@")
+    ignored_extensions = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".css", ".js", ".html", ".htm", ".ico")
 
     all_emails = re.findall(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", text)
     valid_body_emails = []
@@ -231,9 +244,15 @@ def extract_job_spec(offer_text: str, email_data: Optional[Dict[str, Any]] = Non
         em_lower = em.lower().strip()
         if em_lower == cand_email:
             continue
+        if any(em_lower.endswith(ext) for ext in ignored_extensions):
+            continue
         if any(em_lower.endswith(d) for d in ignored_domains):
             continue
         if any(em_lower.startswith(p) for p in ignored_prefixes):
+            continue
+        domain_part = em_lower.split("@")[-1]
+        tld = domain_part.split(".")[-1]
+        if not tld.isalpha() or len(tld) < 2 or len(tld) > 10:
             continue
         valid_body_emails.append(em)
 
@@ -531,7 +550,31 @@ def revert_back_to_recruiter(
 
     target_email = contact_email if (contact_email and contact_email != "Not specified") else sender_email
 
-    is_target_no_reply = is_no_reply_email(target_email) or is_no_reply_email(sender_email)
+    # Self-reply recursion guard: Never dispatch automated revert-back to candidate's own email or SMTP user
+    smtp_user_check = os.getenv("MAIL_USERNAME", "").strip().lower()
+    if (
+        target_email.lower() == candidate_email.lower()
+        or (smtp_user_check and target_email.lower() == smtp_user_check)
+        or (sender_email and smtp_user_check and sender_email.lower() == smtp_user_check)
+    ):
+        status_msg = "Self-sent message — Revert-back skipped"
+        notice_msg = (
+            f"This message originated from candidate's own address ({target_email}). "
+            "Automated reply suppressed to prevent recursive loops."
+        )
+        return {
+            "dispatched": False,
+            "is_no_reply": True,
+            "target_email": target_email,
+            "candidate_email": candidate_email,
+            "portal_url": portal_url,
+            "status": status_msg,
+            "notice": notice_msg,
+            "has_resume": bool(resume_path),
+            "resume_filename": resume_filename,
+        }
+
+    is_target_no_reply = is_no_reply_email(target_email)
 
     if is_target_no_reply or not target_email or target_email == "Not specified":
         status_msg = "No-Reply Email — Portal Application Preferred"
@@ -591,6 +634,7 @@ def revert_back_to_recruiter(
             from email.mime.text import MIMEText
             from email.mime.multipart import MIMEMultipart
             from email.mime.application import MIMEApplication
+            from email.header import Header
 
             msg = MIMEMultipart()
             incoming_subject = email_data.get("subject", "")
@@ -598,13 +642,13 @@ def revert_back_to_recruiter(
                 reply_subject = incoming_subject if incoming_subject.lower().startswith("re:") else f"Re: {incoming_subject}"
             else:
                 reply_subject = f"Re: {job_spec.get('role_title', 'Opportunity')} — {candidate_name}"
-            msg["Subject"] = reply_subject
+            msg["Subject"] = Header(reply_subject, "utf-8")
             msg["From"] = smtp_user or candidate_email
             msg["To"] = target_email
             if email_data.get("message_id"):
                 msg["In-Reply-To"] = email_data["message_id"]
                 msg["References"] = email_data["message_id"]
-            msg.attach(MIMEText(reply_body, "plain"))
+            msg.attach(MIMEText(reply_body, "plain", "utf-8"))
 
             # Attach resume file if available
             if not resume_path or not os.path.exists(resume_path):
@@ -677,7 +721,8 @@ def submit_application(
     Record an application action, evaluate no-reply vs direct recruiter revert-back,
     and persist in Azure Cosmos DB & local databases.
     """
-    profile = candidate_profile or load_candidate_profile()
+    target_uid = kwargs.get("user_id") or os.getenv("SAFEAPPLY_USER_ID", "niyamatkajal0104@gmail.com")
+    profile = candidate_profile or load_candidate_profile(target_uid)
     email_info = email_data or {}
 
     dispatch_res = revert_back_to_recruiter(
@@ -712,7 +757,7 @@ def submit_application(
     }
 
     try:
-        db_save_applied_job(record)
+        db_save_applied_job(record, user_id=target_uid)
     except Exception as exc:  # noqa: BLE001
         print(f"[job_agent] could not save applied job to Cosmos: {exc}")
 

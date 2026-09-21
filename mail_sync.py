@@ -208,7 +208,11 @@ def parse_message(raw_bytes: bytes, uid: str, provider: str) -> Dict[str, Any]:
     sender_email = match.group(1).strip() if match else from_header.strip()
     sender_name = from_header.replace(f"<{sender_email}>", "").strip().strip('"') or sender_email
 
-    is_rec = is_recruitment_email(subject, body, sender_email)
+    own_user = get_mail_credentials().get("username", "").strip().lower()
+    if own_user and sender_email.lower() == own_user:
+        is_rec = False
+    else:
+        is_rec = is_recruitment_email(subject, body, sender_email)
 
     return {
         "id": make_email_doc_id(message_id, sender_email, subject, date_str),
@@ -358,6 +362,20 @@ def sync_mailbox_to_db(
 
                     # Deduplication: already in Cosmos DB -> skip body download
                     if uid in known_uids or (msg_id and msg_id in known_msg_ids):
+                        skipped += 1
+                        continue
+
+                    # Pre-filter: self-sent message / candidate's own email -> skip and never ingest
+                    match = re.search(r"<([^>]+)>", sender)
+                    sender_email = match.group(1).strip() if match else sender.strip()
+                    if creds["username"] and sender_email.lower() == creds["username"].lower():
+                        _known_non_recruitment_uids.add(str(uid))
+                        skipped += 1
+                        continue
+
+                    subj_lower = subj.lower()
+                    if "re: application" in subj_lower or "candidate profile" in subj_lower:
+                        _known_non_recruitment_uids.add(str(uid))
                         skipped += 1
                         continue
 

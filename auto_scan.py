@@ -269,7 +269,7 @@ def apply_to_email(doc_id: str, user_id: str = DEFAULT_USER_ID) -> Dict[str, Any
         return {"ok": False, "error": "Email not found."}
 
     try:
-        profile = load_candidate_profile()
+        profile = load_candidate_profile(user_id)
         job_spec = extract_job_spec(email.get("body", ""), email)
         app_pkg = generate_application_package(job_spec, profile, fast_mode=True)
         sub_rec = submit_application(
@@ -281,6 +281,7 @@ def apply_to_email(doc_id: str, user_id: str = DEFAULT_USER_ID) -> Dict[str, Any
             },
             candidate_profile=profile,
             email_data=email,
+            user_id=user_id,
         )
 
         db_update_email_fields(
@@ -332,8 +333,13 @@ def auto_apply_all_low_risk(user_id: str = DEFAULT_USER_ID) -> List[Dict[str, An
     for e in emails:
         if e.get("user_decision") == "applied" or e.get("status") == "applied":
             continue
-        r_level = e.get("risk_level", "Medium")
-        r_score = e.get("risk_score", 50)
+        # Only auto-apply to messages that have already been scanned
+        if e.get("status") != "scanned":
+            continue
+        r_level = e.get("risk_level") or "Medium"
+        r_score = e.get("risk_score")
+        if r_score is None:
+            r_score = 50
         flags_text = " ".join(str(f).lower() for f in (e.get("analysis") or {}).get("identified_red_flags", []))
         has_severe = any(
             kw in flags_text for kw in ("upfront", "fee", "payment", "money", "check", "cheque", "crypto", "bitcoin", "telegram", "whatsapp", "bank account")
@@ -432,7 +438,7 @@ def scan_and_route_email(
         kw in flags_text for kw in ("upfront", "fee", "payment", "money", "check", "cheque", "crypto", "bitcoin", "telegram", "whatsapp", "bank account")
     )
     is_safe_for_auto_apply = (
-        (risk_level == "Low" or risk_score <= AUTO_APPLY_MAX_RISK_SCORE)
+        (risk_level == "Low" or (risk_score is not None and risk_score <= AUTO_APPLY_MAX_RISK_SCORE))
         and not quarantined
         and not has_severe_scam_indicator
     )

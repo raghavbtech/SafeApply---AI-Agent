@@ -155,7 +155,7 @@ class MailboxService:
     @staticmethod
     def get_dashboard(user_id: str) -> Dict[str, Any]:
         stats = RepositoryAdapter.get_mailbox_stats(user_id)
-        conn_info = MailProviderAdapter.get_connection_info()
+        conn_info = MailProviderAdapter.get_connection_info(user_id=user_id)
         service_health = SecurityEngineAdapter.get_service_health()
         chain = RepositoryAdapter.verify_audit_chain(user_id)
         applied_jobs = RepositoryAdapter.get_applied_jobs(user_id)

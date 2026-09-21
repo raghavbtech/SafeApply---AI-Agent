@@ -19,6 +19,14 @@ async def lifespan(app: FastAPI):
     # Startup validation
     print(f"[SafeApply API] Starting up in {settings.environment} mode.")
     print(f"[SafeApply API] Persistence backend: {settings.cosmos_database if settings.cosmos_endpoint else 'Local JSON'}")
+
+    # Launch background mail poller & autonomous responder daemon
+    if settings.mail_username and settings.mail_app_password:
+        from background_sync import start_background_sync
+        target_user = settings.safeapply_user_id or "niyamatkajal0104@gmail.com"
+        start_background_sync(user_id=target_user)
+        print(f"[SafeApply API] Background mail poller & auto-responder daemon started for {target_user}.")
+
     yield
     print("[SafeApply API] Shutting down.")
 
@@ -56,6 +64,26 @@ def create_app() -> FastAPI:
     # Mount Routes
     app.include_router(health_router)
     app.include_router(api_v1_router)
+
+    from fastapi.responses import FileResponse
+    public_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "public")
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon():
+        ico_file = os.path.join(public_dir, "favicon.ico")
+        if os.path.exists(ico_file):
+            return FileResponse(ico_file, media_type="image/x-icon")
+        return {"error": "favicon not found"}
+
+    @app.get("/", include_in_schema=False)
+    async def root():
+        return {
+            "name": settings.app_name,
+            "version": settings.app_version,
+            "status": "online",
+            "docs": "/docs",
+            "frontend": "http://localhost:5173",
+        }
 
     # Ensure uploads directory exists
     uploads_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")

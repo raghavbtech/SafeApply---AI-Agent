@@ -7,6 +7,7 @@ import azure_db
 import job_agent
 from backend.schemas.profile import CandidateProfileSchema
 from backend.schemas.preferences import UserPreferencesSchema
+from backend.config import settings
 
 
 class RepositoryAdapter:
@@ -54,14 +55,37 @@ class RepositoryAdapter:
 
     @staticmethod
     def get_applied_jobs(user_id: str) -> List[Dict[str, Any]]:
-        return azure_db.db_get_applied_jobs(user_id=user_id)
+        jobs = azure_db.db_get_applied_jobs(user_id=user_id)
+        if not jobs:
+            import os, json
+            fpath = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "applied_jobs.json")
+            if os.path.exists(fpath):
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        if isinstance(data, list) and data:
+                            return data
+                except Exception:
+                    pass
+        return jobs
 
     @staticmethod
     def get_candidate_profile(user_id: str) -> Dict[str, Any]:
         """User-scoped profile from persistent state. Returns empty dict if not configured."""
         stored = azure_db.db_get_state("candidate_profile", default=None, user_id=user_id)
-        if stored and isinstance(stored, dict):
+        if stored and isinstance(stored, dict) and any(stored.values()):
             return stored
+        if user_id and settings.safeapply_user_id and user_id == settings.safeapply_user_id:
+            import os, json
+            prof_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "candidate_profile.json")
+            if os.path.exists(prof_file):
+                try:
+                    with open(prof_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        if isinstance(data, dict):
+                            return data
+                except Exception:
+                    pass
         return {}
 
     @staticmethod
@@ -86,11 +110,11 @@ class RepositoryAdapter:
     @staticmethod
     def get_preferences(user_id: str) -> Dict[str, Any]:
         default_prefs = {
-            "auto_quarantine_enabled": False,
-            "auto_quarantine_threshold": 65,
-            "auto_apply_enabled": False,
-            "auto_apply_max_risk_score": 45,
-            "enable_real_smtp_dispatch": False,
+            "auto_quarantine_enabled": settings.auto_quarantine_enabled,
+            "auto_quarantine_threshold": settings.auto_quarantine_threshold,
+            "auto_apply_enabled": settings.auto_apply_enabled,
+            "auto_apply_max_risk_score": settings.auto_apply_max_risk_score,
+            "enable_real_smtp_dispatch": settings.enable_real_smtp_dispatch,
         }
         stored = azure_db.db_get_state("user_preferences", default=default_prefs, user_id=user_id)
         if not isinstance(stored, dict):

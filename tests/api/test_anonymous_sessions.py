@@ -240,14 +240,14 @@ async def test_delete_my_data_purges_all_records(async_client: AsyncClient):
     await async_client.put(
         "/api/v1/profile",
         cookies={"safeapply_session": cookie},
-        json={"full_name": "To Be Deleted", "skills": ["Temporary"]},
+        json={"full_name": "Session Purge Candidate", "skills": ["Cloud Security"]},
     )
-    fake_pdf = {"file": ("temp.pdf", b"%PDF-1.4 Temp content", "application/pdf")}
+    fake_pdf = {"file": ("purge_sample.pdf", b"%PDF-1.4 Temp content", "application/pdf")}
     await async_client.post("/api/v1/profile/resume", cookies={"safeapply_session": cookie}, files=fake_pdf)
 
     # Verify profile exists
     prof_before = await async_client.get("/api/v1/profile", cookies={"safeapply_session": cookie})
-    assert prof_before.json()["full_name"] == "To Be Deleted"
+    assert prof_before.json()["full_name"] == "Session Purge Candidate"
 
     # Execute Complete Purge
     resp_purge = await async_client.delete("/api/v1/session/data", cookies={"safeapply_session": cookie})

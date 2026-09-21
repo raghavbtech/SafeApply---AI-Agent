@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { RefreshCw, User, Trash2, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useSession } from '../auth/AuthProvider';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { CandidateProfileSchema } from '../api/contracts';
 
 interface HeaderProps {
   title: string;
@@ -10,9 +12,15 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ title, subtitle }) => {
+  const navigate = useNavigate();
   const { session, purgeData } = useSession();
   const queryClient = useQueryClient();
   const [showPurgeConfirm, setShowPurgeConfirm] = useState(false);
+
+  const { data: profile } = useQuery<CandidateProfileSchema>({
+    queryKey: ['profile'],
+    queryFn: () => api.getProfile(),
+  });
 
   const syncMutation = useMutation({
     mutationFn: () => api.syncMailbox(15),
@@ -29,6 +37,7 @@ export const Header: React.FC<HeaderProps> = ({ title, subtitle }) => {
     queryClient.clear();
   };
 
+  const candidateName = profile?.full_name?.trim();
   const sessionIdSnippet = session?.session_id ? `${session.session_id.slice(0, 10)}...` : 'Initializing';
 
   return (
@@ -49,22 +58,36 @@ export const Header: React.FC<HeaderProps> = ({ title, subtitle }) => {
           <span>{syncMutation.isPending ? 'Syncing...' : 'Force Sync'}</span>
         </button>
 
-        {/* Anonymous Session Pill */}
+        {/* Candidate Profile / Anonymous Session Pill */}
         <div className="flex items-center gap-2 pl-2 border-l border-slate-800">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-800 text-slate-300">
-            <ShieldCheck className="h-4 w-4 text-cyan-400" />
-          </div>
-          <div className="hidden text-left sm:block">
-            <span className="block text-xs font-semibold text-white font-mono">
-              {sessionIdSnippet}
-            </span>
-            <span className="block text-[10px] text-emerald-400">Anonymous Session</span>
-          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/profile')}
+            title="View or Edit Candidate Profile"
+            className="flex items-center gap-2.5 rounded-xl border border-cyan-500/20 bg-dark-900/90 px-3 py-1.5 transition hover:border-cyan-500/50 hover:bg-dark-800 text-left"
+          >
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-tr from-cyan-500 to-indigo-500 text-white font-bold text-xs shadow-glow-cyan shrink-0">
+              {candidateName ? (
+                candidateName.charAt(0).toUpperCase()
+              ) : (
+                <ShieldCheck className="h-4 w-4 text-cyan-300" />
+              )}
+            </div>
+            <div className="block text-left">
+              <span className="block text-xs font-semibold text-white tracking-tight truncate max-w-[110px] sm:max-w-[180px]">
+                {candidateName || sessionIdSnippet}
+              </span>
+              <span className="flex items-center gap-1 text-[10px] text-cyan-400 font-medium">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span className="truncate max-w-[80px] sm:max-w-none">{candidateName ? 'Candidate' : 'Anonymous'}</span>
+              </span>
+            </div>
+          </button>
 
           <button
             onClick={() => setShowPurgeConfirm(true)}
             title="Delete My Data & Reset Session"
-            className="ml-2 rounded-lg p-1.5 text-slate-400 hover:bg-dark-800 hover:text-rose-400 transition"
+            className="ml-1 rounded-lg p-1.5 text-slate-400 hover:bg-dark-800 hover:text-rose-400 transition"
           >
             <Trash2 className="h-4 w-4" />
           </button>

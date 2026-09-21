@@ -15,6 +15,13 @@ import time
 import sys
 import importlib
 import streamlit as st
+
+st.set_page_config(
+    page_title="SafeApply — Recruitment Security & Job Agent",
+    page_icon="🛡️",
+    layout="wide",
+)
+
 import ui_mailbox
 importlib.reload(ui_mailbox)
 from ui_mailbox import render_inbox_view, render_spam_view, render_sidebar_status

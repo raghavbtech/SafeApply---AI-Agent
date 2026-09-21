@@ -104,6 +104,15 @@ def is_recruitment_email(subject: str, body: str, sender: str = "") -> bool:
     sender_lower = (sender or "").lower()
     full_text = f"{subject_lower} {body_lower} {sender_lower}"
 
+    # Prevent self-reply recursion: Never treat SafeApply's own automated application/response drafts as recruitment offers
+    if "re: application & candidate profile" in subject_lower or "re: application for" in subject_lower:
+        return False
+    if "dear hiring team & talent acquisition" in body_lower or "i am very interested in this opportunity and would like to revert back" in body_lower:
+        return False
+    env_user = os.getenv("MAIL_USERNAME", "").strip().lower()
+    if env_user and env_user in sender_lower:
+        return False
+
     # Check strong recruitment patterns first (e.g. formal offer, selection letter, CTC)
     has_strong_recruitment = any(re.search(pat, full_text) for pat in STRONG_RECRUITMENT_PATTERNS)
 

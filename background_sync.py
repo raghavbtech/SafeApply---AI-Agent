@@ -7,9 +7,20 @@ recruitment emails without the user manually clicking "Sync".
 """
 
 import os
+import sys
 import threading
 import time
 from datetime import datetime, timezone
+from typing import Optional
+
+# Ensure standard output and error streams handle Unicode emojis and currency symbols on Windows
+try:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 from mail_sync import sync_mailbox_to_db, is_mail_configured
 from auto_scan import scan_all_unscanned, auto_apply_all_low_risk
@@ -17,13 +28,14 @@ from azure_db import DEFAULT_USER_ID, db_set_state
 
 POLL_INTERVAL_SECONDS = int(os.getenv("SAFEAPPLY_POLL_INTERVAL", "10"))  # 10s for ultra-fast response
 
-_poller_started = False
+_poller_thread: Optional[threading.Thread] = None
 _lock = threading.Lock()
 
 
 def is_background_sync_running() -> bool:
-    """Check if the background poller daemon is currently active."""
-    return _poller_started
+    """Check if the background poller daemon is currently active and alive."""
+    global _poller_thread
+    return bool(_poller_thread and _poller_thread.is_alive())
 
 
 def _poll_loop(user_id: str):
@@ -31,15 +43,15 @@ def _poll_loop(user_id: str):
     while True:
         try:
             if is_mail_configured():
-                result = sync_mailbox_to_db(user_id=user_id)
+                result = sync_mailbox_to_db(user_id=user_id, max_messages=15)
                 db_set_state("last_auto_sync", {
                     "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                     "result": result,
                 }, user_id=user_id)
 
                 if result.get("ok"):
-                    # Scan any newly stored or unscanned emails
-                    unscanned_results = scan_all_unscanned(user_id=user_id)
+                    # Scan any newly stored or unscanned emails (batch limit 15 for fast response)
+                    unscanned_results = scan_all_unscanned(user_id=user_id, limit=15)
                     if unscanned_results:
                         quarantined = sum(1 for r in unscanned_results if r.get("quarantined"))
                         applied = sum(1 for r in unscanned_results if r.get("applied"))
@@ -50,17 +62,19 @@ def _poll_loop(user_id: str):
                     if auto_applied:
                         print(f"[background_sync] Auto-applied and dispatched response to {len(auto_applied)} opportunities.")
         except Exception as exc:  # noqa: BLE001
-            print(f"[background_sync] poll error: {exc}")
+            try:
+                print(f"[background_sync] poll warning: {repr(exc)}")
+            except Exception:
+                pass
 
         time.sleep(POLL_INTERVAL_SECONDS)
 
 
 def start_background_sync(user_id: str = DEFAULT_USER_ID):
-    """Idempotent: safe to call on every Streamlit rerun."""
-    global _poller_started
+    """Idempotent: safe to call on every Streamlit rerun or FastAPI startup."""
+    global _poller_thread
     with _lock:
-        if _poller_started:
+        if _poller_thread and _poller_thread.is_alive():
             return
-        thread = threading.Thread(target=_poll_loop, args=(user_id,), daemon=True, name="SafeApply-SyncPoller")
-        thread.start()
-        _poller_started = True
+        _poller_thread = threading.Thread(target=_poll_loop, args=(user_id,), daemon=True, name="SafeApply-SyncPoller")
+        _poller_thread.start()

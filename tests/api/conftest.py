@@ -1,8 +1,12 @@
-"""Pytest fixtures for FastAPI TestClient and AsyncClient."""
+import os
+os.environ["SAFEAPPLY_ENV"] = "testing"
 
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
+from backend.config import settings
+settings.environment = "testing"
+settings.safeapply_user_id = ""
 from backend.main import app
 from backend.schemas.auth import SessionPrincipal
 from backend.security.session import SessionStore

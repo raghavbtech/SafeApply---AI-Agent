@@ -26,10 +26,10 @@ class VerificationService:
         checklist = [
             VerificationChecklistItem(
                 id=item["id"],
-                risk_type=item["risk_type"],
-                description=item["description"],
-                recommended_action=item["recommended_action"],
-                verified=False,
+                risk_type=item.get("risk_type", "General"),
+                description=item.get("description", ""),
+                recommended_action=item.get("recommended_action") or item.get("title") or "Review details",
+                verified=bool(item.get("verified", item.get("completed", False))),
             )
             for item in raw_items
         ]
