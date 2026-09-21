@@ -56,11 +56,20 @@ Visitor Opens Site ➔ Server issues anonymous HTTP-only cookie ➔ Immediate ac
 1. **Unpredictable Server-Side Anonymous Sessions**: On first request, the server automatically generates a cryptographically random session (`anon_<uuid>`). The raw token is delivered exclusively through an HTTP-only, SameSite cookie (`safeapply_session`).
 2. **Server-Side Token Hashing**: The server stores only the `SHA-256` hash of the session token. Raw tokens are never stored in databases or log files.
 3. **Strict Data Partitioning**: Cosmos DB partition keys (`/user_id`) and local JSON storage use `session_id`. Visitor A can never inspect or alter Visitor B's profile, resume, emails, applications, or audit logs.
+4. **Empty New Profiles**: A newly issued session receives an empty candidate profile. Saved profile data is loaded only from that session's partition; no configured demo identity or candidate fixture is used in the public journey.
 4. **Optional & Skippable Onboarding**: Visitors can immediately analyze ad-hoc text or imported `.eml` files without entering personal information. The candidate onboarding modal is fully dismissible with a "Skip for now (Scanner Only)" action. Candidate profile and resume details are only required when calculating skill matching or drafting applications in the Job Agent.
 5. **Private Azure Blob Resume Storage**: Uploaded resumes (PDF, DOCX, TXT; 10MB limit) are validated using magic file signatures, stored in private Azure Blob Storage (with local filesystem fallback), and isolated per session. Resumes are downloaded via byte streaming; physical paths are never exposed.
 6. **Encrypted Mailbox Credentials**: Personal mailbox connections (IMAP/SMTP) encrypt passwords and app tokens at rest using Fernet/authenticated cipher stream before storage in Cosmos DB. A "Disconnect Mailbox" action permanently deletes stored credentials immediately.
 7. **Rate Limiting & CSRF Protection**: Sensitive endpoints are protected by in-memory sliding-window rate limiters. Cookie-authenticated mutation requests validate `Origin` and `Referer` headers against allowed origins.
 8. **Complete Data Erasure ("Delete My Data")**: At any time, a visitor can click "Delete My Data" in the header or settings. This invokes `DELETE /api/v1/session/data` which permanently purges the candidate profile, blob-stored resume files, stored emails, job applications, encrypted mailbox credentials, and cryptographic audit records.
+
+Candidate academic scores use the canonical `cgpa` field and optional `grading_scale`. Legacy stored `gpa` values are read once, migrated to `cgpa` when no non-empty `cgpa` exists, and are never written back. CGPA is optional and is validated against the selected scale when one is supplied.
+
+### Gmail App Password Setup
+
+Settings uses Gmail IMAP and requires a Google App Password, not a normal Google Account password. Enable [Google 2-Step Verification](https://myaccount.google.com/security), then open [Google App Passwords](https://myaccount.google.com/apppasswords), create an app named `SafeApply`, and copy the generated 16-character password. Google generally shows it only once; generate a new password if it is lost. Some managed accounts, Advanced Protection, or administrator policies may not allow App Passwords.
+
+Enter the Gmail address and App Password in Settings. SafeApply authenticates the mailbox before showing it as connected, stores the credential encrypted within the current anonymous session, and never returns it through the API. Disconnecting removes the stored connection; revoke the corresponding App Password in Google Account settings as well. Connecting Gmail does not authorize sending job applications, and synchronization remains a manual user action.
 
 ---
 

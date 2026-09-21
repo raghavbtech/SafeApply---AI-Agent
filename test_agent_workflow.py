@@ -20,8 +20,26 @@ from job_agent import (
     evaluate_candidate_match,
     generate_application_package,
     submit_application,
-    DEFAULT_CANDIDATE_PROFILE,
 )
+
+
+DEFAULT_CANDIDATE_PROFILE = {
+    "full_name": "Test Candidate",
+    "email": "test@example.com",
+    "phone": "+1 555 0100",
+    "education": "B.S. Computer Science",
+    "university": "Test University",
+    "cgpa": "8.8",
+    "grading_scale": "10",
+    "skills": ["Python", "Azure", "FastAPI", "React", "Data Structures", "Algorithms", "Docker"],
+    "experience": "Software engineering test experience",
+    "preferred_roles": ["Software Engineer"],
+    "target_locations": ["Remote"],
+    "portfolio_url": "https://example.com",
+    "linkedin_url": "https://linkedin.com/in/test",
+    "resume_path": "",
+    "resume_filename": "test-resume.pdf",
+}
 
 
 def test_recruitment_email_classifier():

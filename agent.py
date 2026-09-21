@@ -256,6 +256,26 @@ def _sanitize_grounded_output(
         ]
     )
 
+    # Correct a common direction-of-payment grounding error: a UPI address
+    # supplied as the fee destination is not a request for the candidate's ID.
+    candidate_upi_request = bool(re.search(
+        r"(?:send|share|provide|submit|enter|disclose|give)\s+(?:us\s+|your\s+)?(?:own\s+)?upi\s*(?:id|address)",
+        offer_text, re.IGNORECASE,
+    ))
+    payment_destination = bool(re.search(
+        r"(?:pay|transfer|payment|send money|upi id\s*:|payment upi)",
+        offer_text, re.IGNORECASE,
+    ))
+    if payment_destination and not candidate_upi_request:
+        explanation = re.sub(
+            r"(?:including|such as)\s+(?:a\s+|your\s+)?UPI\s*(?:ID|address)\s*,?\s*",
+            "including ", explanation, flags=re.IGNORECASE,
+        )
+        explanation = re.sub(r"\bincluding\s+(?=bank account|government ID)", "including ", explanation, flags=re.IGNORECASE)
+        cleaned_flags = [f for f in cleaned_flags if not re.search(
+            r"(?:share|provide|submit|disclose|send)\s+(?:your\s+)?UPI\s*(?:ID|address)", f, re.IGNORECASE,
+        )]
+
     parsed["explanation"] = explanation
 
     parsed["identified_red_flags"] = list(
@@ -386,6 +406,7 @@ STRICT GROUNDING RULES:
   bank login, Aadhaar, PAN, passport, or payment was requested unless
   the ORIGINAL OFFER TEXT directly supports that claim.
 - The word "UPI" does NOT imply "UPI PIN".
+- A payment destination UPI ID supplied by the sender is NOT a request for the candidate to provide their own UPI ID.
 - A bank-account request does NOT imply a password, OTP, PIN, or debit-card request.
 - Mention only evidence that appears in the original offer or deterministic
   tool outputs.

@@ -418,7 +418,7 @@ export const Inbox: React.FC = () => {
                       </p>
                       <p className="flex items-center gap-2 text-2xs">
                         <Building2 className="h-3.5 w-3.5 text-violet-400 shrink-0" />
-                        <span>Claimed: <b>{selectedEmail.company_name}</b></span>
+                        <span>Claimed: <b>{selectedEmail.company_name && !["unknown", "not specified"].includes(selectedEmail.company_name.toLowerCase()) ? selectedEmail.company_name : (selectedEmail.analysis?.extracted_data?.company_name || "Not identified")}</b> <span className="text-amber-300">(unverified claim)</span></span>
                         <span>· Date: {selectedEmail.date}</span>
                       </p>
                     </div>
@@ -620,8 +620,11 @@ export const Inbox: React.FC = () => {
                           {selectedEmail.analysis.tool_outputs?.rag_matches?.length > 0 ? (
                             selectedEmail.analysis.tool_outputs.rag_matches.map((pat: any, i: number) => (
                               <div key={i} className="rounded-lg bg-dark-900 p-2 border border-slate-800 text-2xs">
-                                <span className="font-bold text-amber-300">Category: {pat.category}</span>
-                                <p className="mt-0.5 text-slate-400">{pat.pattern}</p>
+                                <span className="font-bold text-amber-300">Related reference: {String(pat.category || "unknown").replace(/_/g, " ")}</span>
+                                {Array.isArray(pat.evidence) && pat.evidence.length > 0 ? (
+                                  <div className="mt-1 text-slate-200"><span className="font-semibold">Observed in this email:</span> {pat.evidence.join('; ')}</div>
+                                ) : <p className="mt-1 text-amber-300">No direct evidence recorded for this reference.</p>}
+                                <p className="mt-1 text-slate-400"><span className="font-semibold">Related knowledge-base pattern (not an observed fact):</span> {pat.pattern}</p>
                               </div>
                             ))
                           ) : (
@@ -632,8 +635,8 @@ export const Inbox: React.FC = () => {
 
                       {activeAnalysisTab === 'domain' && (
                         <div className="space-y-1 text-xs text-slate-300">
-                          <p><b>Domain:</b> {selectedEmail.analysis.tool_outputs?.domain_verification?.assessment || 'Verified'}</p>
-                          <p><b>Salary Sanity:</b> {selectedEmail.analysis.tool_outputs?.salary_sanity?.assessment || 'Realistic'}</p>
+                          <p><b>Domain:</b> {selectedEmail.analysis.tool_outputs?.domain_verification?.message || selectedEmail.analysis.tool_outputs?.domain_verification?.status || 'Employer affiliation not verified'}</p>
+                          <p><b>Salary Sanity:</b> {selectedEmail.analysis.tool_outputs?.salary_sanity?.message || selectedEmail.analysis.tool_outputs?.salary_sanity?.assessment || 'No salary assessment available'}</p>
                         </div>
                       )}
                     </div>

@@ -411,6 +411,20 @@ def extract_company_regex(
 
             return company
 
+    # Explicit claimed employer in an offer; this is a claim, NOT verification.
+    # Restrict to hiring context so incidental mentions are not interpreted
+    # as the employer (for example, a candidate's university).
+    explicit = re.search(
+        r"(?i)\b(?:position|role|job|internship)\s+(?:of|as|at|with|for)\s+"
+        r"[A-Za-z][A-Za-z0-9 /+&.-]{2,65}?\s+at\s+"
+        r"([A-Z][A-Za-z0-9&.-]*(?:\s+[A-Z][A-Za-z0-9&.-]*){0,5})"
+        r"(?=[\s.,;:!?\n]|$)", text,
+    )
+    if explicit:
+        candidate = explicit.group(1).strip(' .,-')
+        if candidate.lower() not in {'the company', 'our company'}:
+            return candidate
+
     # -----------------------------------------------------
     # GENERAL BODY PATTERNS
     # -----------------------------------------------------

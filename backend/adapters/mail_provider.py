@@ -6,6 +6,7 @@ Guarantees per-session mailbox credentials and isolation.
 import base64
 import hashlib
 import os
+import imaplib
 from typing import Any, Dict, Optional
 from datetime import datetime, timezone
 
@@ -19,6 +20,7 @@ import auto_scan
 import mail_agent
 import azure_db
 from backend.config import settings
+from backend.errors import ValidationError
 
 
 def _get_encryption_key() -> bytes:
@@ -93,7 +95,7 @@ class MailProviderAdapter:
         Check mailbox connection for this specific visitor session.
         Never returns raw or encrypted passwords to the frontend or API callers.
         """
-        effective_uid = user_id or settings.safeapply_user_id or azure_db.DEFAULT_USER_ID
+        effective_uid = user_id or ""
         last_sync_record = azure_db.db_get_state("last_sync", default=None, user_id=effective_uid)
         last_sync_at = last_sync_record.get("at") if isinstance(last_sync_record, dict) else None
 
@@ -124,21 +126,6 @@ class MailProviderAdapter:
                         "stored_count": len(azure_db.db_fetch_all_emails(user_id=effective_uid)),
                     }
 
-        # Check .env configured credentials fallback ONLY for the default admin user
-        is_default_admin = (not user_id) or (user_id == settings.safeapply_user_id) or (user_id == azure_db.DEFAULT_USER_ID)
-        if is_default_admin and settings.environment != "testing" and settings.mail_username and settings.mail_app_password:
-            stored_count = len(azure_db.db_fetch_all_emails(user_id=effective_uid)) if effective_uid else 0
-            return {
-                "provider": settings.mail_provider or "Gmail",
-                "username": settings.mail_username,
-                "is_connected": True,
-                "status": "connected",
-                "imap_server": settings.mail_imap_server or "imap.gmail.com",
-                "imap_port": settings.mail_imap_port or 993,
-                "last_sync": last_sync_at,
-                "stored_count": stored_count,
-            }
-
         # If not connected by user or .env
         stored_count = len(azure_db.db_fetch_all_emails(user_id=effective_uid)) if effective_uid else 0
         return {
@@ -156,6 +143,17 @@ class MailProviderAdapter:
     def connect_mailbox(user_id: str, creds: Dict[str, Any]) -> Dict[str, Any]:
         """Save per-session mailbox authorization with encrypted credentials."""
         raw_token = creds.get("password_or_app_token", "")
+        if not raw_token:
+            raise ValidationError("A Gmail App Password is required.")
+        if settings.environment.lower() != "testing":
+            server = creds.get("imap_server") or "imap.gmail.com"
+            port = int(creds.get("imap_port") or 993)
+            try:
+                with imaplib.IMAP4_SSL(server, port, timeout=10) as mailbox:
+                    mailbox.login(creds.get("username", ""), raw_token.replace(" ", ""))
+                    mailbox.logout()
+            except Exception as exc:
+                raise ValidationError("Gmail authentication failed. Check the Gmail address and App Password, then try again.") from exc
         encrypted_token = encrypt_credential(raw_token)
         state = {
             "provider": creds.get("provider", "Gmail"),
@@ -175,22 +173,6 @@ class MailProviderAdapter:
         """Internal helper for background workers to retrieve decrypted credentials."""
         auth = azure_db.db_get_state("mailbox_auth", default=None, user_id=user_id)
         if not auth or not isinstance(auth, dict) or not auth.get("is_connected"):
-            # Fallback to .env for the default admin user
-            is_default_admin = (not user_id) or (user_id == settings.safeapply_user_id) or (user_id == azure_db.DEFAULT_USER_ID)
-            if is_default_admin and settings.environment != "testing" and settings.mail_username and settings.mail_app_password:
-                server = settings.mail_imap_server or "imap.gmail.com"
-                port = int(settings.mail_imap_port or 993)
-                pwd = settings.mail_app_password
-                return {
-                    "provider": settings.mail_provider or "Gmail",
-                    "username": settings.mail_username,
-                    "password": pwd,
-                    "password_or_token": pwd,
-                    "server": server,
-                    "imap_server": server,
-                    "port": port,
-                    "imap_port": port,
-                }
             return None
         enc = auth.get("encrypted_password_or_token") or auth.get("password_or_token", "")
         token = decrypt_credential(enc)

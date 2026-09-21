@@ -69,7 +69,12 @@ class BlobStorageAdapter:
                 opaque_ref = f"azure-blob://{settings.azure_storage_container}/{blob_name}"
                 return opaque_ref, clean_name
             except Exception as exc:
+                if settings.environment.lower() in {"production", "staging"}:
+                    raise RuntimeError("Durable resume storage is unavailable.") from exc
                 logger.error(f"Azure Blob upload failed ({exc}), falling back to local storage.")
+
+        if settings.environment.lower() in {"production", "staging"}:
+            raise RuntimeError("Durable resume storage is not configured.")
 
         # Local fallback
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))

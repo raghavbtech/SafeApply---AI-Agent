@@ -20,7 +20,38 @@ import {
   Trash2,
   AlertCircle,
   X,
+  ExternalLink,
+  KeyRound,
+  ChevronDown,
 } from 'lucide-react';
+
+const ExternalGuideLink: React.FC<{ href: string; label: string }> = ({ href, label }) => (
+  <a
+    href={href}
+    target="_blank"
+    rel="noreferrer"
+    className="inline-flex items-center gap-1.5 text-neon-cyan hover:text-white underline underline-offset-2"
+  >
+    {label}<ExternalLink className="w-3 h-3" />
+  </a>
+);
+
+const GuideStep: React.FC<{ number: string; title: string; children: React.ReactNode }> = ({ number, title, children }) => (
+  <section className="space-y-1.5">
+    <h3 className="flex items-center gap-2 font-semibold text-white">
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-neon-cyan text-[10px] font-bold text-black">{number}</span>
+      {title}
+    </h3>
+    <div className="pl-7 space-y-1.5 text-slate-400">{children}</div>
+  </section>
+);
+
+const Faq: React.FC<{ question: string; children: React.ReactNode }> = ({ question, children }) => (
+  <details className="border-b border-border-subtle/60 pb-2 last:border-0 last:pb-0">
+    <summary className="cursor-pointer font-medium text-slate-200">Q: {question}</summary>
+    <p className="mt-1.5 text-slate-400">A: {children}</p>
+  </details>
+);
 
 export const Settings: React.FC = () => {
   const queryClient = useQueryClient();
@@ -40,6 +71,28 @@ export const Settings: React.FC = () => {
   const [connEmail, setConnEmail] = useState('');
   const [connPass, setConnPass] = useState('');
   const [connServer, setConnServer] = useState('imap.gmail.com');
+
+  const connectMailboxMutation = useMutation({
+    mutationFn: () => api.connectMailbox({
+      provider: 'Gmail',
+      username: connEmail.trim(),
+      password_or_app_token: connPass.replace(/\s+/g, ''),
+      imap_server: connServer.trim() || 'imap.gmail.com',
+      imap_port: 993,
+    }),
+    onSuccess: () => {
+      setConnPass('');
+      setShowConnectForm(false);
+      queryClient.invalidateQueries({ queryKey: ['mailbox-status'] });
+      setBannerMsg({ type: 'success', text: 'Gmail Connected. Your mailbox credentials are protected for this session.' });
+    },
+    onError: (err: any) => {
+      setBannerMsg({
+        type: 'error',
+        text: `Gmail connection failed: ${err.message || 'Check your email and App Password, then try again.'}`,
+      });
+    },
+  });
 
   // Purge Session Data Mutation
   const purgeMutation = useMutation({
@@ -206,6 +259,38 @@ export const Settings: React.FC = () => {
               </div>
             </div>
 
+            <details className="group rounded-xl border border-cyan-500/20 bg-cyan-500/5 overflow-hidden">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold text-cyan-200">
+                <span className="flex items-center gap-2"><KeyRound className="w-4 h-4 text-neon-cyan" />How to Connect Your Gmail Account</span>
+                <ChevronDown className="w-4 h-4 transition-transform group-open:rotate-180" />
+              </summary>
+              <div className="border-t border-cyan-500/20 px-4 py-4 text-xs text-slate-300 space-y-4">
+                <p className="text-slate-300">SafeApply uses Gmail IMAP. For this connection method, use a Google App Password, not your normal Google Account password.</p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <GuideStep number="1" title="Enable Google 2-Step Verification">
+                    <p>Open Google Security Settings, sign in, find <strong>2-Step Verification</strong>, and follow Google's instructions. If it is already enabled, continue.</p>
+                    <ExternalGuideLink href="https://myaccount.google.com/security" label="Open Google Security Settings" />
+                  </GuideStep>
+                  <GuideStep number="2" title="Open Google App Passwords">
+                    <p>Open App Passwords and sign in again if asked. This option is available only to eligible accounts. Advanced Protection, administrator policies, or other security settings may prevent App Password creation. Do not disable security protections.</p>
+                    <ExternalGuideLink href="https://myaccount.google.com/apppasswords" label="Open Google App Passwords" />
+                  </GuideStep>
+                  <GuideStep number="3" title="Generate a SafeApply App Password">
+                    <p>Enter <strong>SafeApply</strong> as the app name, select <strong>Create</strong>, and copy the generated 16-character password. Google generally shows it only once. If it is lost, generate a new one.</p>
+                  </GuideStep>
+                  <GuideStep number="4" title="Enter Gmail Connection Details">
+                    <p>Return here and enter the Gmail address plus the new App Password. The password field is masked. Spaces copied from Google are normalized automatically. Never enter your normal Google password.</p>
+                  </GuideStep>
+                  <GuideStep number="5" title="Connect Gmail">
+                    <p>Click <strong>Connect Gmail</strong>. SafeApply checks the connection before showing Gmail Connected. Failed authentication displays an error and leaves the form available for retry.</p>
+                  </GuideStep>
+                  <GuideStep number="6" title="Synchronize Recruitment Emails">
+                    <p>After connecting, use <strong>Sync Mailbox Now</strong> or open My Mailbox to manually synchronize and analyze recruitment emails. No background scanning or mailbox movement is enabled by connecting alone.</p>
+                  </GuideStep>
+                </div>
+              </div>
+            </details>
+
             {/* Mailbox Connect / Disconnect Buttons */}
             <div className="pt-3 border-t border-border-subtle flex flex-col gap-2">
               {mailboxStatus?.is_connected ? (
@@ -237,6 +322,7 @@ export const Settings: React.FC = () => {
                   <span className="font-semibold text-white block">Connect Mailbox Credentials:</span>
                   <input
                     type="email"
+                    required
                     placeholder="your-email@gmail.com"
                     value={connEmail}
                     onChange={(e) => setConnEmail(e.target.value)}
@@ -244,7 +330,8 @@ export const Settings: React.FC = () => {
                   />
                   <input
                     type="password"
-                    placeholder="App Password or Token"
+                    placeholder="16-character Google App Password"
+                    autoComplete="new-password"
                     value={connPass}
                     onChange={(e) => setConnPass(e.target.value)}
                     className="w-full px-3 py-1.5 rounded-lg bg-dark-900 border border-border-subtle text-white focus:outline-none focus:border-neon-cyan"
@@ -258,27 +345,39 @@ export const Settings: React.FC = () => {
                   />
                   <button
                     type="button"
-                    onClick={async () => {
-                      if (!connEmail || !connPass) {
-                        setBannerMsg({ type: 'error', text: 'Email and App Password are required.' });
+                    onClick={() => {
+                      if (!connEmail.trim() || !connPass.trim()) {
+                        setBannerMsg({ type: 'error', text: 'Gmail address and Google App Password are required.' });
                         return;
                       }
-                      await api.connectMailbox({
-                        username: connEmail,
-                        password_or_app_token: connPass,
-                        imap_server: connServer || 'imap.gmail.com',
-                      });
-                      setShowConnectForm(false);
-                      queryClient.invalidateQueries({ queryKey: ['mailbox-status'] });
-                      setBannerMsg({ type: 'success', text: 'Personal mailbox connected securely.' });
+                      if (!/^[^\s@]+@gmail\.com$/i.test(connEmail.trim())) {
+                        setBannerMsg({ type: 'error', text: 'Enter a valid Gmail address ending in @gmail.com.' });
+                        return;
+                      }
+                      connectMailboxMutation.mutate();
                     }}
+                    disabled={connectMailboxMutation.isPending}
                     className="w-full py-2 rounded-lg bg-neon-cyan text-black font-semibold text-xs"
                   >
-                    Save & Authorize Mailbox Link
+                    {connectMailboxMutation.isPending ? 'Checking Gmail Connection...' : 'Connect Gmail'}
                   </button>
                 </div>
               )}
             </div>
+
+            <details className="group rounded-xl border border-border-subtle bg-surface-raised/40 overflow-hidden">
+              <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-xs font-semibold text-white">
+                <span>App Password Help & Gmail Access FAQ</span>
+                <ChevronDown className="w-4 h-4 text-slate-400 transition-transform group-open:rotate-180" />
+              </summary>
+              <div className="border-t border-border-subtle px-4 py-3 space-y-3 text-xs text-slate-300">
+                <Faq question="Can I use my regular Gmail password?">No. This IMAP connection method uses a Google App Password.</Faq>
+                <Faq question="What if I cannot see the App Passwords option?">Check that 2-Step Verification is enabled and that your account is eligible. Some managed accounts and security configurations do not permit App Passwords.</Faq>
+                <Faq question="Can I recover an App Password after closing Google's page?">No. Generate a new App Password if the original is lost.</Faq>
+                <Faq question="How do I revoke SafeApply's Gmail access?">Disconnect Gmail here and revoke the corresponding App Password in Google Account settings.</Faq>
+                <Faq question="Does connecting Gmail allow SafeApply to send job applications?">No. Mailbox reading and application-email sending are separate capabilities and require separate authorization. Connecting Gmail does not automatically authorize application sending.</Faq>
+              </div>
+            </details>
 
             {/* Sync Controls */}
             {mailboxStatus?.is_connected && (

@@ -253,7 +253,7 @@ if not is_candidate_profile_complete(profile):
                 ob_edu = st.text_input("Degree / Major", value=profile.get("education", ""))
             with ob_c2:
                 ob_univ = st.text_input("University / College", value=profile.get("university", ""))
-                ob_gpa = st.text_input("GPA / Percentage", value=profile.get("gpa", ""))
+                ob_gpa = st.text_input("CGPA", value=profile.get("cgpa", profile.get("gpa", "")))
                 ob_linkedin = st.text_input("LinkedIn Profile", value=profile.get("linkedin_url", ""))
                 ob_portfolio = st.text_input("Portfolio / GitHub", value=profile.get("portfolio_url", ""))
 
@@ -297,7 +297,7 @@ if not is_candidate_profile_complete(profile):
                         "phone": ob_phone.strip(),
                         "education": ob_edu.strip(),
                         "university": ob_univ.strip(),
-                        "gpa": ob_gpa.strip(),
+                        "cgpa": ob_gpa.strip(),
                         "linkedin_url": ob_linkedin.strip(),
                         "portfolio_url": ob_portfolio.strip(),
                         "skills": [s.strip() for s in ob_skills.split(",") if s.strip()],
@@ -1088,7 +1088,7 @@ with tab_profile:
 
         with f_c2:
             p_univ = st.text_input("University / College", prof.get("university", ""))
-            p_gpa = st.text_input("GPA / Percentage", prof.get("gpa", ""))
+            p_gpa = st.text_input("CGPA", prof.get("cgpa", prof.get("gpa", "")))
             p_linkedin = st.text_input("LinkedIn Profile", prof.get("linkedin_url", ""))
             p_portfolio = st.text_input("Portfolio / GitHub", prof.get("portfolio_url", ""))
 
@@ -1128,7 +1128,7 @@ with tab_profile:
                 "phone": p_phone.strip(),
                 "education": p_edu.strip(),
                 "university": p_univ.strip(),
-                "gpa": p_gpa.strip(),
+                "cgpa": p_gpa.strip(),
                 "linkedin_url": p_linkedin.strip(),
                 "portfolio_url": p_portfolio.strip(),
                 "skills": [s.strip() for s in p_skills.split(",") if s.strip()],

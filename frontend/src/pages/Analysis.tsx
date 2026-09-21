@@ -312,19 +312,19 @@ export const Analysis: React.FC = () => {
             <div className="flex justify-between py-1.5 border-b border-border-subtle/40">
               <span className="text-slate-400">MX Mail Exchanger Records:</span>
               <span className={`font-medium ${domainOutput.has_mx ? 'text-emerald-400' : 'text-neon-coral'}`}>
-                {domainOutput.has_mx ? '✓ Verified Active MX' : '✗ No MX Records'}
+                {domainOutput.has_mx ? '✓ Mail server records present (not employer verification)' : '✗ No MX Records'}
               </span>
             </div>
             <div className="flex justify-between py-1.5 border-b border-border-subtle/40">
               <span className="text-slate-400">Disposable / Free Provider:</span>
               <span className={`font-medium ${domainOutput.is_free_mail ? 'text-amber-400' : 'text-slate-300'}`}>
-                {domainOutput.is_free_mail ? '⚠️ Free Webmail (Gmail/Yahoo)' : 'Corporate Custom Domain'}
+                {domainOutput.is_free_mail ? '⚠️ Free Webmail (Gmail/Yahoo)' : 'Custom domain (ownership unverified)'}
               </span>
             </div>
             <div className="flex justify-between py-1.5">
               <span className="text-slate-400">Lookalike Spoofing:</span>
               <span className={`font-medium ${domainOutput.is_lookalike ? 'text-neon-coral' : 'text-emerald-400'}`}>
-                {domainOutput.is_lookalike ? '⚠️ Lookalike Spoof Detected' : '✓ No Typosquatting'}
+                {domainOutput.is_lookalike ? '⚠️ Lookalike Spoof Detected' : 'No lookalike detected by this check'}
               </span>
             </div>
           </div>

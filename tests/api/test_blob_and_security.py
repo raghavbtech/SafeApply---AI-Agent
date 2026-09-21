@@ -11,6 +11,42 @@ from backend.security.session import SessionStore
 import azure_db
 
 
+def test_failed_gmail_authentication_is_sanitized_and_not_persisted(monkeypatch):
+    """Failed IMAP login returns no secret and leaves no mailbox credential state."""
+    user_id = "anon_mailbox_failed_auth"
+    original_environment = __import__("backend.config", fromlist=["settings"]).settings.environment
+    monkeypatch.setattr("backend.config.settings.environment", "production")
+
+    class FailingImap:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def login(self, *args, **kwargs):
+            raise OSError("authentication failed")
+
+        def logout(self):
+            pass
+
+    monkeypatch.setattr("backend.adapters.mail_provider.imaplib.IMAP4_SSL", FailingImap)
+    try:
+        with pytest.raises(Exception) as error:
+            MailProviderAdapter.connect_mailbox(
+                user_id=user_id,
+                creds={"provider": "Gmail", "username": "candidate@gmail.com", "password_or_app_token": "secret-test-password"},
+            )
+        assert "secret-test-password" not in str(error.value)
+        state = azure_db.db_get_state("mailbox_auth", default={}, user_id=user_id)
+        assert state == {}
+    finally:
+        __import__("backend.config", fromlist=["settings"]).settings.environment = original_environment
+
+
 def test_blob_storage_upload_download_delete_cycle():
     """Verify BlobStorageAdapter upload, download, ownership verification, and deletion."""
     user_a = "anon_test_user_alpha_12345"

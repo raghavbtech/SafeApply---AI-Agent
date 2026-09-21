@@ -3,6 +3,83 @@
 import pytest
 from httpx import AsyncClient
 from backend.security.session import SessionStore
+from backend.config import settings
+import azure_db
+
+
+def _empty_profile_payload() -> dict:
+    return {
+        "full_name": "",
+        "email": "",
+        "phone": "",
+        "education": "",
+        "university": "",
+        "cgpa": "",
+        "grading_scale": "",
+        "skills": [],
+        "experience": "",
+        "preferred_roles": [],
+        "target_locations": [],
+        "portfolio_url": "",
+        "linkedin_url": "",
+        "resume_filename": "",
+    }
+
+
+@pytest.mark.asyncio
+async def test_new_profile_is_empty_and_zero_skills_are_allowed(async_client: AsyncClient):
+    _, token = SessionStore.create_session(user_agent="new-profile")
+    headers = {"Authorization": f"Bearer {token}"}
+    response = await async_client.get("/api/v1/profile", headers=headers)
+    assert response.status_code == 200
+    profile = response.json()
+    assert profile["cgpa"] == ""
+    assert profile["skills"] == []
+    assert "gpa" not in profile
+
+    payload = _empty_profile_payload()
+    payload.update({"full_name": "New Candidate", "email": "new@example.com"})
+    saved = await async_client.put("/api/v1/profile", headers=headers, json=payload)
+    assert saved.status_code == 200
+    assert saved.json()["skills"] == []
+
+
+@pytest.mark.asyncio
+async def test_legacy_gpa_migrates_without_overwriting_cgpa(async_client: AsyncClient):
+    principal, token = SessionStore.create_session(user_agent="legacy-profile")
+    headers = {"Authorization": f"Bearer {token}"}
+    azure_db.db_set_state("candidate_profile", {"full_name": "Legacy Candidate", "gpa": "8.2", "skills": []}, user_id=principal.session_id)
+
+    response = await async_client.get("/api/v1/profile", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["cgpa"] == "8.2"
+    assert "gpa" not in response.json()
+
+    azure_db.db_set_state("candidate_profile", {"full_name": "Legacy Candidate", "cgpa": "7.9", "gpa": "8.2", "skills": []}, user_id=principal.session_id)
+    response = await async_client.get("/api/v1/profile", headers=headers)
+    assert response.json()["cgpa"] == "7.9"
+
+
+@pytest.mark.asyncio
+async def test_cgpa_scale_is_optional_but_validated(async_client: AsyncClient):
+    _, token = SessionStore.create_session(user_agent="cgpa-validation")
+    headers = {"Authorization": f"Bearer {token}"}
+    payload = _empty_profile_payload()
+    payload.update({"full_name": "Scale Candidate", "email": "scale@example.com", "cgpa": "8.5", "grading_scale": "4"})
+    response = await async_client.put("/api/v1/profile", headers=headers, json=payload)
+    assert response.status_code == 422
+
+
+def test_configured_user_id_never_replaces_anonymous_identity():
+    original = settings.safeapply_user_id
+    settings.safeapply_user_id = "shared@example.com"
+    try:
+        principal, _ = SessionStore.create_session(user_agent="identity-check")
+        assert principal.user_id == principal.session_id
+        assert principal.email != "shared@example.com"
+        assert principal.full_name == "Anonymous Candidate"
+    finally:
+        settings.safeapply_user_id = original
 
 
 @pytest.mark.asyncio

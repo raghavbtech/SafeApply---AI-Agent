@@ -165,7 +165,8 @@ export interface CandidateProfileSchema {
   phone?: string;
   education?: string;
   university?: string;
-  gpa?: string;
+  cgpa?: string;
+  grading_scale?: string;
   skills: string[];
   experience?: string;
   preferred_roles: string[];

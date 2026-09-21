@@ -47,7 +47,7 @@ SafeApply operates as a 100% public, account-free web application:
 
 ### Mailbox Management (Per-Session Isolation)
 - `GET /api/v1/mailboxes`: Get connected mailbox status for the current session (credentials are never exposed).
-- `POST /api/v1/mailboxes/connect`: Connect personal IMAP mailbox credentials (`provider`, `username`, `password_or_app_token`, `imap_server`, `imap_port`) scoped strictly to this visitor.
+- `POST /api/v1/mailboxes/connect`: Connect personal Gmail IMAP credentials (`provider`, `username`, `password_or_app_token`, `imap_server`, `imap_port`) scoped strictly to this visitor. Gmail requires a Google App Password after 2-Step Verification; the backend verifies IMAP access before storing the encrypted credential and never returns it.
 - `POST /api/v1/mailboxes/disconnect`: Disconnect personal IMAP mailbox and delete stored credentials for this session.
 - `POST /api/v1/mailboxes/sync`: Trigger asynchronous IMAP mailbox sync and inbox ingestion for the connected mailbox.
 - `POST /api/v1/emails/{id}/spam`: Move email to spam/junk folder (IMAP move + quarantine vault audit record).

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { CandidateProfileSchema } from '../api/contracts';
+import { useSession } from '../auth/AuthProvider';
 import { Loading } from '../components/Loading';
 import { StatusBanner } from '../components/StatusBanner';
 import {
@@ -31,7 +32,8 @@ export const Profile: React.FC = () => {
     phone: '',
     education: '',
     university: '',
-    gpa: '',
+    cgpa: '',
+    grading_scale: '',
     skills: [],
     experience: '',
     preferred_roles: [],
@@ -52,45 +54,39 @@ export const Profile: React.FC = () => {
   const handleInputChange = (field: keyof CandidateProfileSchema, value: any) => {
     isDirtyRef.current = true;
     setFormData((prev) => ({ ...prev, [field]: value }));
-    if (field === 'full_name') {
-      // Instantly render typed name on the top right corner and across app
-      queryClient.setQueryData(['profile'], (old: any) => ({
-        ...(old || {}),
-        full_name: value,
-      }));
-    }
   };
 
-  const handleFullNameBlur = async () => {
-    const trimmed = formData.full_name?.trim();
-    if (trimmed && isDirtyRef.current) {
-      try {
-        await api.updateProfile(formData);
-        isDirtyRef.current = false;
-        queryClient.invalidateQueries({ queryKey: ['profile'] });
-      } catch (err) {
-        console.warn('Silent auto-update of candidate profile on blur:', err);
-      }
+  const { loading: sessionLoading, session } = useSession();
+  const sessionIdRef = React.useRef<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (!session?.session_id) return;
+    if (sessionIdRef.current && sessionIdRef.current !== session.session_id) {
+      isDirtyRef.current = false;
+      setFormData({
+        full_name: '', email: '', phone: '', education: '', university: '', cgpa: '',
+        grading_scale: '', skills: [], experience: '', preferred_roles: [],
+        target_locations: [], portfolio_url: '', linkedin_url: '', resume_filename: '',
+        is_complete: false,
+      });
+      setNewSkill('');
+      setNewRole('');
+      setNewLocation('');
     }
-  };
+    sessionIdRef.current = session.session_id;
+  }, [session?.session_id]);
 
   const { data: profile, isLoading } = useQuery<CandidateProfileSchema>({
     queryKey: ['profile'],
     queryFn: () => api.getProfile(),
+    enabled: !sessionLoading && Boolean(session),
   });
 
   useEffect(() => {
     if (profile) {
       setFormData((prev) => {
         // If the user has unsaved edits in the form, preserve their inputs and only merge server fields
-        if (isDirtyRef.current) {
-          return {
-            ...profile,
-            ...prev,
-            resume_filename: profile.resume_filename || prev.resume_filename,
-            resume_path: profile.resume_path || prev.resume_path,
-          };
-        }
+        if (isDirtyRef.current) return prev;
         return profile;
       });
     }
@@ -120,7 +116,7 @@ export const Profile: React.FC = () => {
       // Auto-save candidate details first so the backend updates candidate_profile before attaching resume
       const hasUserData = Boolean(
         formData.full_name || formData.email || formData.phone || formData.education ||
-        formData.university || formData.gpa || formData.experience || formData.skills.length > 0
+        formData.university || formData.cgpa || formData.experience || formData.skills.length > 0
       );
       if (hasUserData) {
         try {
@@ -208,11 +204,6 @@ export const Profile: React.FC = () => {
       setBannerMsg({ type: 'error', text: 'Full Name and Email are required fields.' });
       return;
     }
-    if (formData.skills.length < 3) {
-      setBannerMsg({ type: 'warning', text: 'Please add at least 3 skills for accurate AI job matching.' });
-      return;
-    }
-
     updateMutation.mutate({
       ...formData,
       is_complete: true,
@@ -286,7 +277,6 @@ export const Profile: React.FC = () => {
                     required
                     value={formData.full_name}
                     onChange={(e) => handleInputChange('full_name', e.target.value)}
-                    onBlur={handleFullNameBlur}
                     placeholder="Jane Doe"
                     className="w-full pl-9 pr-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan font-medium"
                   />
@@ -375,7 +365,7 @@ export const Profile: React.FC = () => {
               Academic Credentials
             </h3>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
               <div className="space-y-1.5">
                 <label className="text-slate-300 font-medium">Degree & Field</label>
                 <input
@@ -399,12 +389,23 @@ export const Profile: React.FC = () => {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-slate-300 font-medium">GPA</label>
+                <label className="text-slate-300 font-medium">CGPA</label>
                 <input
                   type="text"
-                  value={formData.gpa || ''}
-                  onChange={(e) => handleInputChange('gpa', e.target.value)}
-                  placeholder="3.85"
+                  value={formData.cgpa || ''}
+                  onChange={(e) => handleInputChange('cgpa', e.target.value)}
+                  placeholder="Enter your CGPA (e.g., 8.5)"
+                  className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-violet focus:ring-1 focus:ring-neon-violet font-medium"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-slate-300 font-medium">Grading Scale</label>
+                <input
+                  type="text"
+                  value={formData.grading_scale || ''}
+                  onChange={(e) => handleInputChange('grading_scale', e.target.value)}
+                  placeholder="e.g., 10 or 4"
                   className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-violet focus:ring-1 focus:ring-neon-violet font-medium"
                 />
               </div>
@@ -444,7 +445,7 @@ export const Profile: React.FC = () => {
 
             <div className="flex flex-wrap gap-2 pt-1 min-h-[48px]">
               {formData.skills.length === 0 ? (
-                <span className="text-xs text-slate-500 italic">No skills added yet. Minimum 3 required.</span>
+                <span className="text-xs text-slate-500 italic">No skills added yet. Add skills later to improve job matching.</span>
               ) : (
                 formData.skills.map((skill) => (
                   <span
@@ -632,7 +633,8 @@ export const Profile: React.FC = () => {
                     phone: '',
                     education: '',
                     university: '',
-                    gpa: '',
+                    cgpa: '',
+                    grading_scale: '',
                     skills: [],
                     experience: '',
                     preferred_roles: [],
@@ -648,7 +650,8 @@ export const Profile: React.FC = () => {
                     phone: '',
                     education: '',
                     university: '',
-                    gpa: '',
+                    cgpa: '',
+                    grading_scale: '',
                     skills: [],
                     experience: '',
                     preferred_roles: [],

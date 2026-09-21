@@ -22,7 +22,7 @@ The candidate profile itself is small, purely local preference data (no scam
 evidence, no audit requirement), so it stays in a local JSON file rather than
 Cosmos. Its default is deliberately empty: a Job Agent that fabricates job
 details on the employer's side (Flaw 9) and also fabricates the candidate's
-own name, GPA, and college on the other side would be an odd double
+own name, CGPA, and college on the other side would be an odd double
 standard. An empty profile simply produces a lower match score and a more
 generic (but not invented) cover letter until the user fills it in.
 """
@@ -50,7 +50,8 @@ EMPTY_CANDIDATE_PROFILE: Dict[str, Any] = {
     "phone": "",
     "education": "",
     "university": "",
-    "gpa": "",
+    "cgpa": "",
+    "grading_scale": "",
     "skills": [],
     "experience": "",
     "preferred_roles": [],
@@ -60,24 +61,6 @@ EMPTY_CANDIDATE_PROFILE: Dict[str, Any] = {
     "resume_path": "",
     "resume_filename": "",
 }
-
-DEFAULT_CANDIDATE_PROFILE: Dict[str, Any] = {
-    "full_name": "Aarav Sharma",
-    "email": "aarav.sharma@example.com",
-    "phone": "+91 98765 43210",
-    "education": "B.Tech in Computer Science & Engineering",
-    "university": "National Institute of Technology",
-    "gpa": "8.8 / 10.0",
-    "skills": ["Python", "Data Structures", "Algorithms", "Machine Learning", "SQL", "REST APIs", "Git", "Azure", "Docker", "Java"],
-    "experience": "Software Engineering Intern at CloudPulse (6 months) - Built scalable RESTful services in Python and Azure.",
-    "preferred_roles": ["Software Engineer", "Backend Developer", "Machine Learning Engineer"],
-    "target_locations": ["Bengaluru", "Hyderabad", "Remote"],
-    "portfolio_url": "https://github.com/aaravsharma-dev",
-    "linkedin_url": "https://linkedin.com/in/aaravsharma",
-    "resume_path": "",
-    "resume_filename": "",
-}
-
 
 # =========================================================
 # CANDIDATE PROFILE MANAGEMENT
@@ -107,7 +90,7 @@ def is_candidate_profile_complete(profile: Optional[Dict[str, Any]]) -> bool:
 
 def load_candidate_profile(user_id: Optional[str] = None) -> Dict[str, Any]:
     """Load the candidate profile from persistent database state, or local storage."""
-    uid = user_id or os.getenv("SAFEAPPLY_USER_ID", "").strip()
+    uid = user_id
     if uid:
         try:
             from azure_db import db_get_state
@@ -119,15 +102,6 @@ def load_candidate_profile(user_id: Optional[str] = None) -> Dict[str, Any]:
         except Exception:
             pass
 
-    if os.path.exists(PROFILE_FILE):
-        try:
-            with open(PROFILE_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            merged = dict(EMPTY_CANDIDATE_PROFILE)
-            merged.update(data)
-            return merged
-        except Exception:
-            return EMPTY_CANDIDATE_PROFILE.copy()
     return EMPTY_CANDIDATE_PROFILE.copy()
 
 
@@ -376,7 +350,7 @@ Candidate Details:
 - Full Name: {cand_name}
 - Email: {cand_email}
 - Phone: {cand_phone}
-- Education: {cand_degree} from {cand_univ} (GPA: {profile.get('gpa', 'Not specified')})
+- Education: {cand_degree} from {cand_univ} (CGPA: {profile.get('cgpa', 'Not specified')})
 - Technical Skills: {matched_skills_str}
 - Experience: {cand_exp if cand_exp and cand_exp.upper() != 'NA' else 'Academic projects & coursework'}
 - Resume Attachment: {profile.get('resume_filename', 'Resume.pdf')}
@@ -447,7 +421,7 @@ Email: {cand_email} | Phone: {cand_phone}
 
     if not recruiter_reply:
         edu_info = f"{cand_degree} from {cand_univ}" if (cand_degree and cand_univ) else (cand_degree or cand_univ or "Computer Science")
-        gpa_info = f" (GPA: {profile.get('gpa')})" if profile.get('gpa') else ""
+        cgpa_info = f" (CGPA: {profile.get('cgpa')})" if profile.get('cgpa') else ""
         exp_info = f"\n- Experience Summary:   {cand_exp}" if (cand_exp and cand_exp.upper() != "NA") else ""
         links_info = ""
         if profile.get('linkedin_url') or profile.get('portfolio_url'):
@@ -467,7 +441,7 @@ CANDIDATE PROFILE HIGHLIGHTS
 - Full Name:            {cand_name}
 - Contact Email:        {cand_email}
 - Phone Number:         {cand_phone}
-- Qualification:        {edu_info}{gpa_info}
+- Qualification:        {edu_info}{cgpa_info}
 - Core Skillsets:       {matched_skills_str}{exp_info}{links_info}
 
 ==================================================
@@ -721,7 +695,7 @@ def submit_application(
     Record an application action, evaluate no-reply vs direct recruiter revert-back,
     and persist in Azure Cosmos DB & local databases.
     """
-    target_uid = kwargs.get("user_id") or os.getenv("SAFEAPPLY_USER_ID", "niyamatkajal0104@gmail.com")
+    target_uid = kwargs.get("user_id") or ""
     profile = candidate_profile or load_candidate_profile(target_uid)
     email_info = email_data or {}
 

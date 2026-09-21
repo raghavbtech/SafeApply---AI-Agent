@@ -21,13 +21,14 @@ class ProfileService:
     def get_profile(user_id: str) -> CandidateProfileSchema:
         prof = RepositoryAdapter.get_candidate_profile(user_id)
         is_comp = job_agent.is_candidate_profile_complete(prof) if prof else False
-        return CandidateProfileSchema(
+        result = CandidateProfileSchema(
             full_name=prof.get("full_name") or "",
             email=prof.get("email") or "",
             phone=prof.get("phone") or "",
             education=prof.get("education") or "",
             university=prof.get("university") or "",
-            gpa=prof.get("gpa") or "",
+            cgpa=prof.get("cgpa") or prof.get("gpa") or "",
+            grading_scale=prof.get("grading_scale") or "",
             skills=prof.get("skills") or [],
             experience=prof.get("experience") or "",
             preferred_roles=prof.get("preferred_roles") or [],
@@ -38,24 +39,36 @@ class ProfileService:
             resume_filename=prof.get("resume_filename") or "",
             is_complete=is_comp,
         )
+        try:
+            result.validate_cgpa_against_scale()
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        return result
 
     @staticmethod
     def update_profile(profile_data: CandidateProfileSchema, user_id: str) -> CandidateProfileSchema:
         existing = RepositoryAdapter.get_candidate_profile(user_id)
         merged = dict(existing)
         data = profile_data.model_dump()
+        try:
+            profile_data.validate_cgpa_against_scale()
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        data.pop("gpa", None)
         merged.update({k: v for k, v in data.items() if k != "is_complete"})
+        merged.pop("gpa", None)
         
         RepositoryAdapter.save_candidate_profile(merged, user_id)
         is_comp = job_agent.is_candidate_profile_complete(merged)
         
-        return CandidateProfileSchema(
+        result = CandidateProfileSchema(
             full_name=merged.get("full_name") or "",
             email=merged.get("email") or "",
             phone=merged.get("phone") or "",
             education=merged.get("education") or "",
             university=merged.get("university") or "",
-            gpa=merged.get("gpa") or "",
+            cgpa=merged.get("cgpa") or "",
+            grading_scale=merged.get("grading_scale") or "",
             skills=merged.get("skills") or [],
             experience=merged.get("experience") or "",
             preferred_roles=merged.get("preferred_roles") or [],
@@ -66,6 +79,11 @@ class ProfileService:
             resume_filename=merged.get("resume_filename") or "",
             is_complete=is_comp,
         )
+        try:
+            result.validate_cgpa_against_scale()
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        return result
 
     @classmethod
     def save_resume(cls, filename: str, content: bytes, content_type: str, user_id: str) -> ResumeUploadResponse:

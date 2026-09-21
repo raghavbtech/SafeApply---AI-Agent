@@ -62,18 +62,12 @@ class RepositoryAdapter:
         """User-scoped profile from persistent state. Returns empty dict if not configured."""
         stored = azure_db.db_get_state("candidate_profile", default=None, user_id=user_id)
         if stored and isinstance(stored, dict) and any(stored.values()):
+            if not stored.get("cgpa") and stored.get("gpa"):
+                stored = dict(stored)
+                stored["cgpa"] = stored["gpa"]
+                stored.pop("gpa", None)
+                azure_db.db_set_state("candidate_profile", stored, user_id=user_id)
             return stored
-        if user_id and settings.safeapply_user_id and user_id == settings.safeapply_user_id:
-            import os, json
-            prof_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "candidate_profile.json")
-            if os.path.exists(prof_file):
-                try:
-                    with open(prof_file, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                        if isinstance(data, dict):
-                            return data
-                except Exception:
-                    pass
         return {}
 
     @staticmethod

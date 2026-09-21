@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { SessionStatusResponse, UserPrincipal } from '../api/contracts';
 import { api } from '../api/client';
 
@@ -15,12 +16,15 @@ const SessionContext = createContext<SessionContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [session, setSession] = useState<SessionStatusResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const queryClient = useQueryClient();
 
   const refreshSession = async () => {
     try {
       const sess = await api.getSession();
+      queryClient.clear();
       setSession(sess);
     } catch {
+      queryClient.clear();
       setSession(null);
     } finally {
       setLoading(false);
