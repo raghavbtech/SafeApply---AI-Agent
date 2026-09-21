@@ -58,6 +58,13 @@ async def csrf_protect_middleware(request: Request, call_next):
     allowed.add("http://localhost:3000")
     allowed.add("http://test")
     allowed.add("http://testserver")
+    allowed.add("https://safeapply-live-app-g0f0hte3g8fmfcgw.indiasouthcentral-01.azurewebsites.net")
+
+    # Dynamic Same-Origin allowance from Request Host header
+    host = request.headers.get("host")
+    if host:
+        allowed.add(f"https://{host}")
+        allowed.add(f"http://{host}")
 
     # Match candidate origin
     if candidate_origin not in allowed and not any(candidate_origin.startswith(a) for a in allowed):

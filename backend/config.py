@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     cookie_samesite: str = "lax"
     uploads_dir: str = Field(default="uploads", alias="SAFEAPPLY_UPLOADS_DIR")
     cors_origins_raw: str = Field(
-        default="http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000",
+        default="http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,https://safeapply-live-app-g0f0hte3g8fmfcgw.indiasouthcentral-01.azurewebsites.net",
         alias="SAFEAPPLY_CORS_ORIGINS",
     )
     safeapply_user_id: str = Field(default="", alias="SAFEAPPLY_USER_ID")
