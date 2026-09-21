@@ -69,14 +69,16 @@ async def safeapply_exception_handler(request: Request, exc: SafeApplyError) -> 
 
 
 async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    # Log exception internally, but return sanitized message to client
-    print(f"[SafeApply Internal Error] {type(exc).__name__}: {str(exc)}")
+    # Log exception internally, and provide diagnostic detail in response
+    err_detail = f"{type(exc).__name__}: {str(exc)}"
+    print(f"[SafeApply Internal Error] {err_detail}")
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "error": {
                 "message": "An internal server error occurred. Please try again later.",
                 "status_code": 500,
+                "detail": err_detail,
             }
         },
     )
