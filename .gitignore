@@ -42,7 +42,7 @@ uploads/*
 
 # Frontend & Web Artifacts
 frontend/node_modules/
-frontend/dist/
+!frontend/dist/
 frontend/.vite/
 .vite/
 frontend/.env.local
