@@ -34,7 +34,7 @@ class ApiClient {
 
     const url = endpoint.startsWith('http') ? endpoint : `${API_BASE}${endpoint}`;
     // Always include credentials so HTTP-only session cookie is sent and received
-    const response = await fetch(url, { ...options, headers, credentials: 'same-origin' });
+    const response = await fetch(url, { ...options, headers, credentials: 'include' });
 
     if (!response.ok) {
       let errorMsg = 'An unexpected error occurred';

@@ -146,7 +146,16 @@ def _local_save(data: Dict[str, List[Dict[str, Any]]]) -> None:
     tmp = LOCAL_FALLBACK_PATH + ".tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, default=str)
-    os.replace(tmp, LOCAL_FALLBACK_PATH)
+    try:
+        os.replace(tmp, LOCAL_FALLBACK_PATH)
+    except OSError:
+        with open(LOCAL_FALLBACK_PATH, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2, default=str)
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
 
 
 def _local_upsert(bucket: str, doc: Dict[str, Any]) -> None:
@@ -606,6 +615,12 @@ def db_get_state(key: str, default: Any = None, user_id: str = DEFAULT_USER_ID) 
             return item.get("value", default)
         except Exception:
             return default
+
+    rows = _local_query("state", user_id)
+    for r in rows:
+        if r.get("key") == key:
+            return r.get("value", default)
+    return default
 
 def db_purge_user_data(user_id: Optional[str] = None) -> Dict[str, int]:
     """
