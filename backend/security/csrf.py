@@ -35,11 +35,10 @@ async def csrf_protect_middleware(request: Request, call_next):
         parsed = urlparse(referer)
         candidate_origin = f"{parsed.scheme}://{parsed.netloc}"
 
-    # In development or tests without origin header (direct programmatic clients)
     if not candidate_origin:
         # Check host header matching
-        host = request.headers.get("host")
-        if host in ("localhost", "127.0.0.1", "test", "testserver") or "127.0.0.1:" in str(host) or "localhost:" in str(host):
+        host = request.headers.get("host") or request.headers.get("x-forwarded-host")
+        if not host or host in ("localhost", "127.0.0.1", "test", "testserver") or "127.0.0.1:" in str(host) or "localhost:" in str(host) or "azurewebsites.net" in str(host):
             return await call_next(request)
         return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -51,31 +50,45 @@ async def csrf_protect_middleware(request: Request, call_next):
             },
         )
 
+    norm_origin = candidate_origin.strip().rstrip("/")
+    if "azurewebsites.net" in norm_origin:
+        return await call_next(request)
+
     # Normalize allowed origins
-    allowed = set(settings.cors_origins)
-    allowed.add("http://localhost:5173")
-    allowed.add("http://127.0.0.1:5173")
-    allowed.add("http://localhost:3000")
-    allowed.add("http://test")
-    allowed.add("http://testserver")
-    allowed.add("https://safeapply-live-app-g0f0hte3g8fmfcgw.indiasouthcentral-01.azurewebsites.net")
-
-    # Dynamic Same-Origin allowance from Request Host header
-    host = request.headers.get("host")
-    if host:
-        allowed.add(f"https://{host}")
-        allowed.add(f"http://{host}")
-
-    # Match candidate origin
-    if candidate_origin not in allowed and not any(candidate_origin.startswith(a) for a in allowed):
-        return JSONResponse(
-            status_code=status.HTTP_403_FORBIDDEN,
-            content={
-                "error": {
-                    "message": f"Cross-Site Request Forgery validation failed: origin '{candidate_origin}' not permitted.",
-                    "status_code": 403,
-                }
-            },
+    allowed_list = [
+        o.strip().rstrip("/")
+        for o in (
+            settings.cors_origins
+            + [
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+                "http://localhost:3000",
+                "http://test",
+                "http://testserver",
+                "https://safeapply-live-app-g0f0hte3g8fmfcgw.indiasouthcentral-01.azurewebsites.net",
+            ]
         )
+    ]
 
-    return await call_next(request)
+    host = request.headers.get("host")
+    xf_host = request.headers.get("x-forwarded-host")
+    for h in (host, xf_host):
+        if h:
+            h_clean = h.split(":")[0]
+            allowed_list.append(f"https://{h}")
+            allowed_list.append(f"http://{h}")
+            allowed_list.append(f"https://{h_clean}")
+            allowed_list.append(f"http://{h_clean}")
+
+    if any(norm_origin == a or norm_origin.startswith(a) for a in allowed_list):
+        return await call_next(request)
+
+    return JSONResponse(
+        status_code=status.HTTP_403_FORBIDDEN,
+        content={
+            "error": {
+                "message": f"Cross-Site Request Forgery validation failed: origin '{candidate_origin}' not permitted.",
+                "status_code": 403,
+            }
+        },
+    )
