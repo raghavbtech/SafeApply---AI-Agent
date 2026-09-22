@@ -63,6 +63,33 @@ class ApiClient {
     return this.request('/profile/resume', { method: 'DELETE' });
   }
 
+  async getResumePreview(): Promise<Blob> {
+    const response = await fetch(`${API_BASE}/profile/resume/preview`, {
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      let errorMsg = 'Unable to load resume preview';
+      try {
+        const errorData = await response.json();
+        errorMsg = errorData.error?.message || errorData.detail || errorMsg;
+      } catch {
+        errorMsg = `Server error (${response.status})`;
+      }
+      throw new Error(errorMsg);
+    }
+    return response.blob();
+  }
+
+  async getResumeDownload(): Promise<Blob> {
+    const response = await fetch(`${API_BASE}/profile/resume`, {
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      throw new Error('Unable to download resume');
+    }
+    return response.blob();
+  }
+
   async deleteProfile(): Promise<any> {
     return this.request('/profile', { method: 'DELETE' });
   }

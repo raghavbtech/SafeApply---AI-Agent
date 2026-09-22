@@ -13,6 +13,7 @@ import {
   GraduationCap,
   FileText,
   Upload,
+  Download,
   CheckCircle2,
   AlertCircle,
   Plus,
@@ -48,6 +49,10 @@ export const Profile: React.FC = () => {
   const [newRole, setNewRole] = useState('');
   const [newLocation, setNewLocation] = useState('');
   const [bannerMsg, setBannerMsg] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   const isDirtyRef = React.useRef(false);
 
@@ -129,6 +134,7 @@ export const Profile: React.FC = () => {
       return api.uploadResume(file);
     },
     onSuccess: (data) => {
+      closePreview();
       setFormData((prev) => ({ ...prev, resume_filename: data.filename }));
       setBannerMsg({
         type: 'success',
@@ -216,6 +222,43 @@ export const Profile: React.FC = () => {
       uploadResumeMutation.mutate(file);
     }
   };
+
+  const closePreview = () => {
+    setIsPreviewOpen(false);
+    setPreviewError(null);
+  };
+
+  useEffect(() => {
+    if (!isPreviewOpen || !formData.resume_filename) return;
+
+    const isPdf = formData.resume_filename.toLowerCase().endsWith('.pdf');
+    let cancelled = false;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    const getResumeFile = isPdf ? api.getResumePreview : api.getResumeDownload;
+    getResumeFile.call(api)
+      .then((blob) => {
+        if (!cancelled) setPreviewUrl(URL.createObjectURL(blob));
+      })
+      .catch((error: Error) => {
+        if (!cancelled) setPreviewError(error.message || 'Unable to load resume preview.');
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      setPreviewUrl((url) => {
+        if (url) URL.revokeObjectURL(url);
+        return null;
+      });
+    };
+  }, [isPreviewOpen, formData.resume_filename]);
+
+  useEffect(() => () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
 
   if (isLoading) {
     return <Loading message="Loading candidate profile and skills index..." />;
@@ -306,7 +349,7 @@ export const Profile: React.FC = () => {
                     type="text"
                     value={formData.phone || ''}
                     onChange={(e) => handleInputChange('phone', e.target.value)}
-                    placeholder="+1 (555) 019-2834"
+                    placeholder="+91 98xx00xx00"
                     className="w-full pl-9 pr-3 py-2 rounded-xl bg-white border border-slate-300 text-slate-900 placeholder:text-slate-500 caret-black focus:outline-none focus:border-neon-cyan focus:ring-1 focus:ring-neon-cyan font-medium"
                   />
                 </div>
@@ -565,6 +608,9 @@ export const Profile: React.FC = () => {
                 <p className="text-2xs text-slate-400">
                   Ready for autonomous application drafting.
                 </p>
+                <p className="text-2xs text-slate-500 uppercase tracking-wide">
+                  File type: {formData.resume_filename.split('.').pop()?.toUpperCase() || 'Unknown'}
+                </p>
               </div>
             ) : (
               <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300">
@@ -573,21 +619,35 @@ export const Profile: React.FC = () => {
             )}
 
             {formData.resume_filename && (
-              <button
-                type="button"
-                onClick={async () => {
-                  if (window.confirm('Delete your uploaded resume file?')) {
-                    await api.deleteResume();
-                    setFormData((prev) => ({ ...prev, resume_filename: '', resume_path: '' }));
-                    queryClient.invalidateQueries({ queryKey: ['profile'] });
-                    setBannerMsg({ type: 'success', text: 'Resume file deleted successfully.' });
-                  }
-                }}
-                className="w-full py-2 px-3 rounded-lg border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 font-medium text-xs flex items-center justify-center gap-1.5 transition"
-              >
-                <X className="w-3.5 h-3.5" />
-                Remove Attached Resume
-              </button>
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPreviewError(null);
+                    setIsPreviewOpen(true);
+                  }}
+                  className="w-full py-2 px-3 rounded-lg border border-neon-cyan/40 bg-neon-cyan/10 hover:bg-neon-cyan/20 text-neon-cyan font-medium text-xs flex items-center justify-center gap-1.5 transition"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  Preview Resume
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (window.confirm('Delete your uploaded resume file?')) {
+                      closePreview();
+                      await api.deleteResume();
+                      setFormData((prev) => ({ ...prev, resume_filename: '', resume_path: '' }));
+                      queryClient.invalidateQueries({ queryKey: ['profile'] });
+                      setBannerMsg({ type: 'success', text: 'Resume file deleted successfully.' });
+                    }
+                  }}
+                  className="w-full py-2 px-3 rounded-lg border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 font-medium text-xs flex items-center justify-center gap-1.5 transition"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  Remove Attached Resume
+                </button>
+              </div>
             )}
 
             <div>
@@ -672,6 +732,43 @@ export const Profile: React.FC = () => {
           )}
         </div>
       </form>
+
+      {isPreviewOpen && formData.resume_filename && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-3 sm:p-6 backdrop-blur-md" role="dialog" aria-modal="true" aria-labelledby="resume-preview-title">
+          <div className="flex h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-border-subtle bg-surface-card shadow-2xl">
+            <div className="flex items-center justify-between gap-3 border-b border-border-subtle px-4 py-3 sm:px-6">
+              <h2 id="resume-preview-title" className="truncate text-sm font-semibold text-white">{formData.resume_filename}</h2>
+              <button type="button" onClick={closePreview} aria-label="Close resume preview" className="rounded-lg p-2 text-slate-400 hover:bg-surface-raised hover:text-white">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 bg-slate-950 p-3 sm:p-5">
+              {formData.resume_filename.toLowerCase().endsWith('.pdf') ? (
+                previewLoading ? (
+                  <div className="flex h-full items-center justify-center text-sm text-slate-400">Loading resume preview...</div>
+                ) : previewError ? (
+                  <div className="flex h-full items-center justify-center text-center text-sm text-rose-300">{previewError}</div>
+                ) : previewUrl ? (
+                  <iframe title={`Preview of ${formData.resume_filename}`} src={previewUrl} className="h-full w-full rounded-lg bg-white" />
+                ) : null
+              ) : (
+                <div className="flex h-full items-center justify-center px-5 text-center text-sm text-slate-300">
+                  Preview is currently available for PDF resumes. Download this DOCX file to view it.
+                </div>
+              )}
+            </div>
+            <div className="flex flex-col-reverse gap-2 border-t border-border-subtle px-4 py-3 sm:flex-row sm:justify-end sm:px-6">
+              <button type="button" onClick={closePreview} className="rounded-lg border border-border-subtle px-4 py-2 text-xs font-medium text-slate-300 hover:bg-surface-raised">Close</button>
+              {previewUrl && (
+                <a href={previewUrl} download={formData.resume_filename} className="flex items-center justify-center gap-1.5 rounded-lg bg-neon-cyan px-4 py-2 text-xs font-semibold text-black hover:bg-neon-cyan/90">
+                  <Download className="h-3.5 w-3.5" />
+                  Download
+                </a>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

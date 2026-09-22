@@ -186,6 +186,12 @@ class ProfileService:
         
         content, fname, ctype = res
         orig_filename = prof.get("resume_filename") or fname
+        media_types = {
+            ".pdf": "application/pdf",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".txt": "text/plain",
+        }
+        ctype = media_types.get(os.path.splitext(orig_filename)[1].lower(), ctype)
         return content, orig_filename, ctype
 
     @staticmethod

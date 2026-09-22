@@ -115,6 +115,15 @@ async def test_profile_crud_and_resume(async_client: AsyncClient, auth_headers: 
     assert resp_dl.status_code == 200
     assert resp_dl.content == fake_resume
 
+    # 4b. Preview uses the same authorized bytes with private inline headers
+    resp_preview = await async_client.get("/api/v1/profile/resume/preview", headers=auth_headers)
+    assert resp_preview.status_code == 200
+    assert resp_preview.content == fake_resume
+    assert resp_preview.headers["content-type"] == "application/pdf"
+    assert resp_preview.headers["content-disposition"].startswith("inline;")
+    assert resp_preview.headers["cache-control"] == "private, no-store"
+    assert resp_preview.headers["x-content-type-options"] == "nosniff"
+
     # 5. Delete resume
     resp_del = await async_client.delete("/api/v1/profile/resume", headers=auth_headers)
     assert resp_del.status_code == 200
@@ -159,3 +168,37 @@ We are pleased to offer you a Software Engineer position at Corp.
     # Visitor B MUST NOT be able to fetch Visitor A's email (404/403)
     resp_b = await async_client.get(f"/api/v1/emails/{email_a_id}", headers=headers_b)
     assert resp_b.status_code in (404, 403)
+
+
+@pytest.mark.asyncio
+async def test_resume_preview_isolated_between_sessions(async_client: AsyncClient):
+    _, token_a = SessionStore.create_session(user_agent="preview-a")
+    _, token_b = SessionStore.create_session(user_agent="preview-b")
+    headers_a = {"Authorization": f"Bearer {token_a}"}
+    headers_b = {"Authorization": f"Bearer {token_b}"}
+    pdf = b"%PDF-1.4 Private candidate A resume"
+
+    uploaded = await async_client.post(
+        "/api/v1/profile/resume", headers=headers_a,
+        files={"file": ("candidate-a.pdf", pdf, "application/pdf")},
+    )
+    assert uploaded.status_code == 200
+    assert (await async_client.get("/api/v1/profile/resume/preview", headers=headers_b)).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_resume_preview_missing_resume_returns_404(async_client: AsyncClient, auth_headers: dict):
+    response = await async_client.get("/api/v1/profile/resume/preview", headers=auth_headers)
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_resume_preview_storage_failure_is_sanitized(async_client: AsyncClient, auth_headers: dict, monkeypatch):
+    def fail_download(*args, **kwargs):
+        raise RuntimeError("storage credential should never be returned")
+
+    monkeypatch.setattr("backend.services.profile_service.ProfileService.get_resume_bytes", fail_download)
+    response = await async_client.get("/api/v1/profile/resume/preview", headers=auth_headers)
+    assert response.status_code == 500
+    assert "storage credential" not in response.text
+    assert "detail" not in response.json()["error"]
