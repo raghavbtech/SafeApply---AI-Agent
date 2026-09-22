@@ -39,9 +39,9 @@ export const Sidebar: React.FC = () => {
   ];
 
   return (
-    <aside className="fixed left-0 top-0 z-30 flex h-screen w-64 flex-col border-r border-slate-800/80 bg-dark-950/95 backdrop-blur-2xl">
+    <aside className="fixed left-0 top-0 z-30 hidden h-screen w-64 flex-col border-r border-slate-800/80 bg-dark-950/95 backdrop-blur-2xl lg:flex">
       {/* Brand Header */}
-      <div className="flex h-16 items-center gap-3 border-b border-slate-800/80 px-6">
+      <div className="app-header-height flex items-center gap-3 border-b border-slate-800/80 px-6">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-tr from-cyan-500 to-violet-600 shadow-neon-cyan">
           <ShieldCheck className="h-6 w-6 text-white" />
         </div>

@@ -42,6 +42,8 @@ SafeApply provides an explainable, multi-layered risk assessment that helps stud
 
 SafeApply operates as a **100% public, account-free web application**. 
 
+The landing page includes a looping **illustrative risk-analysis demonstration** using fictional job offers and scores. It performs no API calls, does not represent live user activity or model output, and pauses for reduced-motion preferences or user interaction.
+
 There are **no login pages, no signup forms, no passwords, and no demo credential buttons**.
 
 ```

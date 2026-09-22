@@ -5,6 +5,7 @@ import { CandidateProfileSchema } from '../api/contracts';
 import { useSession } from '../auth/AuthProvider';
 import { Loading } from '../components/Loading';
 import { StatusBanner } from '../components/StatusBanner';
+import { RESUME_ACCEPT, validateResumeFile } from '../utils/resumeValidation';
 import {
   User,
   Mail,
@@ -143,9 +144,15 @@ export const Profile: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['profile'] });
     },
     onError: (err: any) => {
+      const message = err.message || '';
+      const friendlyMessage = message.includes('10MB')
+        ? 'That resume is larger than the 10MB limit.'
+        : message.includes('Supported resume formats') || message.includes('Invalid')
+          ? 'Please choose a valid PDF, DOCX, or TXT resume.'
+          : 'We could not attach that resume right now. Please try again.';
       setBannerMsg({
         type: 'error',
-        text: `Resume upload failed: ${err.message || 'Unknown error'}`
+        text: friendlyMessage
       });
     }
   });
@@ -216,11 +223,19 @@ export const Profile: React.FC = () => {
     });
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      uploadResumeMutation.mutate(file);
+  const handleResumeSelection = (file: File | undefined) => {
+    if (!file) return;
+    const validationError = validateResumeFile(file);
+    if (validationError) {
+      setBannerMsg({ type: 'error', text: validationError });
+      return;
     }
+    uploadResumeMutation.mutate(file);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    handleResumeSelection(e.target.files?.[0]);
+    e.target.value = '';
   };
 
   const closePreview = () => {
@@ -652,9 +667,16 @@ export const Profile: React.FC = () => {
 
             <div>
               <label className="block text-2xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
-                Upload New Resume (PDF, DOCX)
+                Upload New Resume (PDF, DOCX, TXT)
               </label>
-              <label className="flex flex-col items-center justify-center p-6 border-2 border-dashed border-border-subtle hover:border-neon-cyan rounded-xl cursor-pointer bg-surface-raised/40 transition-colors">
+              <label
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  handleResumeSelection(event.dataTransfer.files?.[0]);
+                }}
+                className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-border-subtle bg-surface-raised/40 p-6 transition-colors hover:border-neon-cyan"
+              >
                 <Upload className="w-6 h-6 text-neon-cyan mb-2" />
                 <span className="text-xs font-medium text-slate-300">
                   {uploadResumeMutation.isPending ? 'Uploading file...' : 'Select or drop resume'}
@@ -662,7 +684,7 @@ export const Profile: React.FC = () => {
                 <span className="text-2xs text-slate-500 mt-1">Up to 10MB</span>
                 <input
                   type="file"
-                  accept=".pdf,.docx,.doc,.txt"
+                  accept={RESUME_ACCEPT}
                   onChange={handleFileChange}
                   disabled={uploadResumeMutation.isPending}
                   className="hidden"

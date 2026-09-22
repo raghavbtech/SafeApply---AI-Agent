@@ -202,3 +202,48 @@ async def test_resume_preview_storage_failure_is_sanitized(async_client: AsyncCl
     assert response.status_code == 500
     assert "storage credential" not in response.text
     assert "detail" not in response.json()["error"]
+
+
+@pytest.mark.asyncio
+async def test_resume_format_matrix_and_replacement(async_client: AsyncClient):
+    _, token = SessionStore.create_session(user_agent="resume-format-matrix")
+    headers = {"Authorization": f"Bearer {token}"}
+    pdf = b"%PDF-1.4 Valid PDF resume"
+    docx = b"PK\x03\x04 Valid DOCX package bytes"
+    text = b"Plain text resume"
+
+    for filename, content, content_type in (
+        ("candidate.pdf", pdf, "application/pdf"),
+        ("candidate.docx", docx, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        ("candidate.txt", text, "text/plain"),
+    ):
+        response = await async_client.post(
+            "/api/v1/profile/resume", headers=headers,
+            files={"file": (filename, content, content_type)},
+        )
+        assert response.status_code == 200
+        assert response.json()["filename"] == filename
+
+    unsupported = await async_client.post(
+        "/api/v1/profile/resume", headers=headers,
+        files={"file": ("candidate.png", b"PNG bytes", "image/png")},
+    )
+    assert unsupported.status_code == 422
+
+    oversized = await async_client.post(
+        "/api/v1/profile/resume", headers=headers,
+        files={"file": ("large.pdf", b"%PDF" + b"0" * (10 * 1024 * 1024), "application/pdf")},
+    )
+    assert oversized.status_code == 422
+
+    replaced = await async_client.post(
+        "/api/v1/profile/resume", headers=headers,
+        files={"file": ("replacement.pdf", pdf, "application/pdf")},
+    )
+    assert replaced.status_code == 200
+    profile = await async_client.get("/api/v1/profile", headers=headers)
+    assert profile.json()["resume_filename"] == "replacement.pdf"
+
+    deleted = await async_client.delete("/api/v1/profile/resume", headers=headers)
+    assert deleted.status_code == 200
+    assert (await async_client.get("/api/v1/profile/resume", headers=headers)).status_code == 404

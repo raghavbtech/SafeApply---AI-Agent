@@ -4,6 +4,7 @@ import { Sidebar } from '../components/Sidebar';
 import { Header } from '../components/Header';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
+import { RESUME_ACCEPT, validateResumeFile } from '../utils/resumeValidation';
 import { AlertTriangle, Upload, Check, Sparkles } from 'lucide-react';
 
 export const AppShell: React.FC = () => {
@@ -66,15 +67,16 @@ export const AppShell: React.FC = () => {
   });
 
   const [dismissedOnboarding, setDismissedOnboarding] = useState(false);
+  const [resumeError, setResumeError] = useState('');
 
   const showOnboarding = !dismissedOnboarding && profile && !profile.is_complete && location.pathname !== '/profile';
 
   return (
     <div className="flex min-h-screen bg-dark-950 text-slate-100">
       <Sidebar />
-      <div className="flex flex-1 flex-col pl-64 min-w-0 overflow-x-hidden">
+      <div className="flex min-w-0 flex-1 flex-col overflow-x-hidden lg:pl-64">
         <Header title={currentMeta.title} subtitle={currentMeta.subtitle} />
-        <main className="flex-1 p-8 min-w-0 max-w-full">
+        <main className="min-w-0 max-w-full flex-1 p-4 sm:p-6 lg:p-8">
           <Outlet />
         </main>
       </div>
@@ -170,10 +172,16 @@ export const AppShell: React.FC = () => {
                 <label className="block text-[11px] font-semibold text-slate-300">Candidate Resume (PDF, DOCX, TXT) *</label>
                 <input
                   type="file"
-                  accept=".pdf,.docx,.txt"
-                  onChange={(e) => setObResume(e.target.files?.[0] || null)}
+                  accept={RESUME_ACCEPT}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    const error = file ? validateResumeFile(file) : null;
+                    setResumeError(error || '');
+                    setObResume(error ? null : file || null);
+                  }}
                   className="mt-1 w-full rounded-lg border border-slate-700 bg-dark-850 px-3 py-1.5 text-xs text-slate-400 file:mr-3 file:rounded-md file:border-0 file:bg-cyan-500/10 file:px-2.5 file:py-1 file:text-xs file:font-semibold file:text-cyan-300 hover:file:bg-cyan-500/20"
                 />
+                {resumeError && <p className="mt-1.5 text-[11px] text-rose-300">{resumeError}</p>}
               </div>
 
               <div className="mt-5 flex items-center justify-between gap-3 pt-2">
