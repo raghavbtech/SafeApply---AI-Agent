@@ -173,10 +173,17 @@ export const Inbox: React.FC = () => {
 
   const spamMutation = useMutation({
     mutationFn: (emailId: string) => api.moveToSpam(emailId, candidateNotes || 'Moved to quarantine by candidate'),
-    onSuccess: () => {
+    onSuccess: (data) => {
+      const text = data.local_quarantined && data.mailbox_moved
+        ? 'Email moved to SafeApply Quarantine and Gmail Spam.'
+        : data.local_quarantined && data.error?.includes('No linked Gmail message')
+          ? 'Email quarantined in SafeApply. No linked Gmail message was available to move.'
+          : data.local_quarantined
+            ? 'Email quarantined in SafeApply, but it could not be moved to Gmail Spam. Check your mailbox connection.'
+            : (data.error || 'Quarantine failed.');
       setBannerMsg({
-        type: 'warning',
-        text: 'Threat isolated and routed to Quarantine Vault.'
+        type: data.local_quarantined && data.mailbox_moved ? 'success' : 'warning',
+        text,
       });
       queryClient.invalidateQueries({ queryKey: ['emails'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
@@ -189,9 +196,15 @@ export const Inbox: React.FC = () => {
   const restoreMutation = useMutation({
     mutationFn: (emailId: string) => api.restoreFromSpam(emailId),
     onSuccess: (data) => {
+      const restoredInMailbox = data.mailbox_restored === true;
+      const localOnlyRestore = data.ok === true && !data.mailbox_restored && !data.error;
       setBannerMsg({
-        type: 'success',
-        text: `Offer restored to inbox. ${data.mailbox_restored ? 'Restored on remote IMAP server.' : 'Restored in local session database.'}`
+        type: restoredInMailbox ? 'success' : localOnlyRestore ? 'warning' : 'error',
+        text: restoredInMailbox
+          ? 'Email restored to SafeApply and Gmail Inbox.'
+          : localOnlyRestore
+            ? 'Email restored in SafeApply. Gmail was not modified.'
+            : `Gmail restoration failed: ${data.error || 'Check your mailbox connection.'}`
       });
       queryClient.invalidateQueries({ queryKey: ['emails'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard'] });
@@ -360,7 +373,7 @@ export const Inbox: React.FC = () => {
             ) : (
               emails.map((em) => {
                 const isSelected = em.id === selectedEmailId;
-                const hasImapMoved = em.mailbox_action === 'moved_to_spam';
+                const hasImapMoved = em.mailbox_action === 'moved_to_spam' || em.mailbox_action === 'moved_to_junk';
 
                 return (
                   <div

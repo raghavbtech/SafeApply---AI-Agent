@@ -203,7 +203,7 @@ EMAIL_DEFAULTS: Dict[str, Any] = {
     "doc_type": "email",
     "status": "unscanned",       # unscanned | scanned | error
     "folder": "inbox",           # inbox | spam   (SafeApply's own view)
-    "mailbox_action": "none",    # none | moved_to_junk | move_failed | restored
+    "mailbox_action": "none",    # none | moved_to_spam | local_only | move_failed | restored
     "user_decision": "none",     # none | applied | ignored
     "is_recruitment": True,
     "risk_score": None,

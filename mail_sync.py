@@ -28,6 +28,7 @@ import re
 import socket
 import imaplib
 import email as email_pkg
+import hashlib
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -190,11 +191,40 @@ def find_junk_folder(mail: imaplib.IMAP4_SSL, provider: str) -> str:
     return FALLBACK_JUNK_FOLDERS.get(provider, "Junk")
 
 
+def get_selected_uidvalidity(mail: imaplib.IMAP4_SSL) -> Optional[str]:
+    """Return UIDVALIDITY for the currently selected folder when advertised."""
+    try:
+        typ, data = mail.response("UIDVALIDITY")
+        if typ == "UIDVALIDITY" and data and data[0]:
+            value = data[0]
+            return value.decode() if isinstance(value, bytes) else str(value)
+    except Exception:
+        pass
+    return None
+
+
+def mailbox_account_id(credentials: Dict[str, Any]) -> str:
+    """Create a non-sensitive stable identity for one connected mailbox."""
+    basis = "|".join(
+        str(credentials.get(key) or "").strip().lower()
+        for key in ("provider", "username", "server", "imap_server", "port", "imap_port")
+    )
+    return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:32]
+
+
 # =========================================================
 # MESSAGE PARSING
 # =========================================================
 
-def parse_message(raw_bytes: bytes, uid: str, provider: str) -> Dict[str, Any]:
+def parse_message(
+    raw_bytes: bytes,
+    uid: str,
+    provider: str,
+    mailbox_account: str = "",
+    source_folder: str = "INBOX",
+    uidvalidity: Optional[str] = None,
+    mailbox_username: str = "",
+) -> Dict[str, Any]:
     """Turn raw RFC822 bytes into a SafeApply email document."""
     msg = email_pkg.message_from_bytes(raw_bytes)
 
@@ -208,7 +238,7 @@ def parse_message(raw_bytes: bytes, uid: str, provider: str) -> Dict[str, Any]:
     sender_email = match.group(1).strip() if match else from_header.strip()
     sender_name = from_header.replace(f"<{sender_email}>", "").strip().strip('"') or sender_email
 
-    own_user = get_mail_credentials().get("username", "").strip().lower()
+    own_user = mailbox_username.strip().lower()
     if own_user and sender_email.lower() == own_user:
         is_rec = False
     else:
@@ -218,6 +248,9 @@ def parse_message(raw_bytes: bytes, uid: str, provider: str) -> Dict[str, Any]:
         "id": make_email_doc_id(message_id, sender_email, subject, date_str),
         "message_id": message_id,
         "imap_uid": str(uid),
+        "mailbox_account_id": mailbox_account,
+        "source_folder": source_folder,
+        "source_uidvalidity": uidvalidity,
         "provider": provider,
         "sender": sender_email,
         "sender_name": sender_name,
@@ -326,6 +359,9 @@ def sync_mailbox_to_db(
             port=creds.get("port", 993),
             readonly=True,
         )
+        source_folder = "INBOX"
+        source_uidvalidity = get_selected_uidvalidity(mail)
+        account_id = mailbox_account_id(creds)
 
         typ, data = mail.uid("SEARCH", None, "ALL")
         if typ != "OK" or not data or not data[0]:
@@ -423,7 +459,15 @@ def sync_mailbox_to_db(
                         if not isinstance(raw_bytes, (bytes, bytearray)):
                             continue
 
-                        doc = parse_message(bytes(raw_bytes), uid, creds["provider"])
+                        doc = parse_message(
+                            bytes(raw_bytes),
+                            uid,
+                            creds["provider"],
+                            mailbox_account=account_id,
+                            source_folder=source_folder,
+                            uidvalidity=source_uidvalidity,
+                            mailbox_username=creds["username"],
+                        )
                         if not doc.get("is_recruitment"):
                             skipped += 1
                             continue

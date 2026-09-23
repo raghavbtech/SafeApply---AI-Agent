@@ -235,7 +235,14 @@ class MailProviderAdapter:
 
     @staticmethod
     def move_to_spam(email_id: str, reason: str, user_id: str, automated: bool = False) -> Dict[str, Any]:
-        return auto_scan.move_to_spam(doc_id=email_id, reason=reason, user_id=user_id, automated=automated)
+        credentials = MailProviderAdapter.get_decrypted_credentials(user_id)
+        return auto_scan.move_to_spam(
+            doc_id=email_id,
+            reason=reason,
+            user_id=user_id,
+            automated=automated,
+            credentials=credentials,
+        )
 
     @staticmethod
     def restore_from_spam(email_id: str, user_id: str) -> Dict[str, Any]:

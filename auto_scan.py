@@ -26,6 +26,8 @@ have, the ability to destroy a user's mail.
 """
 
 import os
+import re
+import email as email_pkg
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
@@ -42,7 +44,8 @@ from azure_db import (
 from mail_sync import (
     close_imap,
     find_junk_folder,
-    get_mail_credentials,
+    get_selected_uidvalidity,
+    mailbox_account_id,
     open_imap,
 )
 
@@ -99,7 +102,10 @@ def _move_uid(mail, uid: str, destination: str) -> bool:
     supported by Gmail and Outlook. Falls back to COPY + \\Deleted + EXPUNGE
     for servers without MOVE.
     """
-    capabilities = {c.upper() for c in getattr(mail, "capabilities", ())}
+    capabilities = {
+        c.decode().upper() if isinstance(c, bytes) else str(c).upper()
+        for c in getattr(mail, "capabilities", ())
+    }
 
     if "MOVE" in capabilities:
         typ, _ = mail.uid("MOVE", uid, f'"{destination}"')
@@ -109,9 +115,72 @@ def _move_uid(mail, uid: str, destination: str) -> bool:
     if typ != "OK":
         return False
 
-    mail.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
-    mail.expunge()
-    return True
+    typ, _ = mail.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
+    if typ != "OK":
+        return False
+    typ, _ = mail.expunge()
+    return typ == "OK"
+
+
+def _select_folder_uidvalidity(mail, folder: str, readonly: bool = False) -> Optional[str]:
+    typ, _ = mail.select(folder, readonly=readonly)
+    if typ != "OK":
+        return None
+    return get_selected_uidvalidity(mail)
+
+
+def _message_id_from_uid(mail, uid: str) -> Optional[str]:
+    typ, data = mail.uid(
+        "FETCH", str(uid), "(UID BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])"
+    )
+    if typ != "OK" or not data:
+        return None
+    for item in data:
+        if isinstance(item, tuple) and len(item) > 1 and isinstance(item[1], bytes):
+            message = email_pkg.message_from_bytes(item[1])
+            return (message.get("Message-ID", "") or "").strip() or None
+    return None
+
+
+def _find_unique_message_id(mail, message_id: str) -> Optional[str]:
+    typ, data = mail.uid("SEARCH", None, f'HEADER Message-ID "{message_id}"')
+    if typ != "OK" or not data or not data[0]:
+        return None
+    matches = data[0].split()
+    return matches[0].decode() if len(matches) == 1 and isinstance(matches[0], bytes) else (
+        str(matches[0]) if len(matches) == 1 else None
+    )
+
+
+def _resolve_source_uid(mail, email: Dict[str, Any], account_id: str) -> tuple[Optional[str], Optional[str]]:
+    """Resolve one exact source message; never accept a bare UID as global identity."""
+    stored_account = email.get("mailbox_account_id")
+    if stored_account and stored_account != account_id:
+        return None, "The email belongs to a different connected mailbox."
+
+    source_folder = str(email.get("source_folder") or "INBOX")
+    current_uidvalidity = _select_folder_uidvalidity(mail, source_folder, readonly=False)
+    stored_uidvalidity = email.get("source_uidvalidity")
+    if stored_uidvalidity and current_uidvalidity and str(stored_uidvalidity) != str(current_uidvalidity):
+        return None, "The saved mailbox location is stale; no message was moved."
+
+    uid = str(email.get("imap_uid") or "").strip()
+    message_id = str(email.get("message_id") or "").strip()
+    if uid:
+        found_message_id = _message_id_from_uid(mail, uid)
+        if found_message_id is not None:
+            if message_id and found_message_id != message_id:
+                return None, "The saved message identity does not match this mailbox message."
+            return uid, None
+        if stored_uidvalidity:
+            return None, "The saved message is no longer present at its verified mailbox location."
+
+    if message_id:
+        resolved = _find_unique_message_id(mail, message_id)
+        if resolved:
+            return resolved, None
+        return None, "Could not uniquely locate the original Gmail message."
+    return None, "No linked Gmail message is available for this email."
 
 
 def move_to_spam(
@@ -119,6 +188,7 @@ def move_to_spam(
     reason: str,
     user_id: str = DEFAULT_USER_ID,
     automated: bool = False,
+    credentials: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Move a message into the mailbox's real Junk folder and mark it 'spam' in
@@ -129,44 +199,72 @@ def move_to_spam(
     if not email:
         return {"ok": False, "error": "Email not found in database."}
 
+    if email.get("mailbox_action") == "moved_to_spam" and email.get("folder") == "spam":
+        return {"ok": True, "mailbox_moved": True, "local_quarantined": True, "error": None}
+
     uid = email.get("imap_uid")
-    creds = get_mail_credentials()
+    if credentials is None:
+        from backend.adapters.mail_provider import MailProviderAdapter
+        credentials = MailProviderAdapter.get_decrypted_credentials(user_id)
+    creds = credentials or {}
     moved = False
     error = ""
+    provider_folder = None
+    provider_uidvalidity = None
 
-    if uid and creds["username"] and creds["password"]:
+    has_linked_identity = bool(uid or (email.get("message_id") and email.get("mailbox_account_id")))
+    if has_linked_identity and creds.get("username") and (creds.get("password") or creds.get("password_or_token")):
         mail = None
         try:
             mail = open_imap(
                 provider=creds["provider"],
                 username=creds["username"],
-                password=creds["password"],
+                password=creds.get("password") or creds.get("password_or_token"),
                 server=creds.get("server"),
                 port=creds.get("port", 993),
                 readonly=False,
             )
-            junk = find_junk_folder(mail, creds["provider"])
-            moved = _move_uid(mail, str(uid), junk)
+            resolved_uid, identity_error = _resolve_source_uid(
+                mail, email, mailbox_account_id(creds)
+            )
+            if identity_error:
+                error = identity_error
+            else:
+                junk = find_junk_folder(mail, creds.get("provider", "Gmail"))
+                moved = _move_uid(mail, str(resolved_uid), junk)
+                provider_folder = junk if moved else None
+                provider_uidvalidity = _select_folder_uidvalidity(mail, junk, readonly=True) if moved else None
             if not moved:
-                error = f"Server refused the move to '{junk}'."
+                error = error or "The mailbox refused the move to Spam."
         except Exception as exc:  # noqa: BLE001
-            error = str(exc)
+            error = "Mailbox movement failed. Check the connected mailbox."
         finally:
             close_imap(mail)
     else:
-        error = "No IMAP UID or credentials; quarantined in SafeApply only."
+        error = (
+            "No linked Gmail message is available; quarantined in SafeApply only."
+            if not has_linked_identity
+            else "No connected Gmail message; quarantined in SafeApply only."
+        )
 
-    db_update_email_fields(
-        doc_id,
-        {
-            "folder": "spam",
-            "mailbox_action": "moved_to_junk" if moved else "move_failed",
-            "quarantine_reason": reason,
-            "quarantined_at": _utcnow(),
-            "quarantined_automatically": automated,
-        },
-        user_id,
-    )
+    local_updated = False
+    try:
+        local_updated = bool(db_update_email_fields(
+            doc_id,
+            {
+                "status": "quarantined",
+                "folder": "spam",
+                "mailbox_action": "moved_to_spam" if moved else ("local_only" if not uid else "move_failed"),
+                "provider_folder": provider_folder,
+                "provider_uidvalidity": provider_uidvalidity,
+                "quarantine_reason": reason,
+                "quarantined_at": _utcnow(),
+                "quarantined_automatically": automated,
+            },
+            user_id,
+        ))
+    except Exception:
+        error = "Mailbox result was received, but SafeApply could not save it."
 
     db_write_audit(
         action="auto_quarantine" if automated else "manual_quarantine",
@@ -183,7 +281,7 @@ def move_to_spam(
         user_id=user_id,
     )
 
-    return {"ok": True, "mailbox_moved": moved, "error": error}
+    return {"ok": local_updated, "mailbox_moved": moved, "local_quarantined": local_updated, "error": error or None}
 
 
 def restore_from_spam(doc_id: str, user_id: str = DEFAULT_USER_ID) -> Dict[str, Any]:
@@ -195,51 +293,61 @@ def restore_from_spam(doc_id: str, user_id: str = DEFAULT_USER_ID) -> Dict[str, 
     if not email:
         return {"ok": False, "error": "Email not found in database."}
 
-    creds = get_mail_credentials()
+    if email.get("mailbox_action") not in {"moved_to_spam", "moved_to_junk"}:
+        updated = bool(db_update_email_fields(
+            doc_id, {"folder": "inbox", "status": "scanned", "mailbox_action": "restored", "restored_at": _utcnow()}, user_id
+        ))
+        return {"ok": updated, "mailbox_restored": False, "error": None if updated else "Could not restore local quarantine."}
+
+    from backend.adapters.mail_provider import MailProviderAdapter
+    creds = MailProviderAdapter.get_decrypted_credentials(user_id)
     restored = False
     error = ""
 
-    if email.get("mailbox_action") == "moved_to_junk" and creds["username"]:
+    if creds and creds.get("username") and (creds.get("password") or creds.get("password_or_token")):
         mail = None
         try:
+            stored_account = email.get("mailbox_account_id")
+            if stored_account and stored_account != mailbox_account_id(creds):
+                return {"ok": False, "mailbox_restored": False, "error": "The email belongs to a different connected mailbox."}
             mail = open_imap(
                 provider=creds["provider"],
                 username=creds["username"],
-                password=creds["password"],
+                password=creds.get("password") or creds.get("password_or_token"),
                 server=creds.get("server"),
                 port=creds.get("port", 993),
                 readonly=False,
             )
-            junk = find_junk_folder(mail, creds["provider"])
-            mail.select(junk, readonly=False)
+            junk = str(email.get("provider_folder") or find_junk_folder(mail, creds.get("provider", "Gmail")))
+            junk_uidvalidity = _select_folder_uidvalidity(mail, junk, readonly=False)
+            stored_uidvalidity = email.get("provider_uidvalidity")
+            if stored_uidvalidity and junk_uidvalidity and str(stored_uidvalidity) != str(junk_uidvalidity):
+                error = "The saved Spam location is stale; no other message was moved."
+                target_uid = None
+            else:
+                target_uid = None
 
             # The UID changes when a message moves between folders, so find
             # the message again by its stable Message-ID header.
             message_id = email.get("message_id", "")
             target_uid = None
-            if message_id:
-                typ, data = mail.uid("SEARCH", None, f'HEADER Message-ID "{message_id}"')
-                if typ == "OK" and data and data[0]:
-                    target_uid = data[0].split()[0].decode()
+            if message_id and not error:
+                target_uid = _find_unique_message_id(mail, message_id)
 
             if target_uid:
                 restored = _move_uid(mail, target_uid, "INBOX")
             else:
-                error = "Could not locate the message in the Junk folder."
+                error = error or "Could not uniquely locate the message in Gmail Spam."
         except Exception as exc:  # noqa: BLE001
-            error = str(exc)
+            error = "Gmail restoration failed. Check the connected mailbox."
         finally:
             close_imap(mail)
 
-    db_update_email_fields(
-        doc_id,
-        {
-            "folder": "inbox",
-            "mailbox_action": "restored" if restored else email.get("mailbox_action", "none"),
-            "restored_at": _utcnow(),
-        },
-        user_id,
-    )
+    local_updated = False
+    if restored:
+        local_updated = bool(db_update_email_fields(
+            doc_id, {"folder": "inbox", "mailbox_action": "restored", "restored_at": _utcnow()}, user_id
+        ))
 
     db_write_audit(
         action="restore_from_spam",
@@ -252,7 +360,7 @@ def restore_from_spam(doc_id: str, user_id: str = DEFAULT_USER_ID) -> Dict[str, 
         user_id=user_id,
     )
 
-    return {"ok": True, "mailbox_restored": restored, "error": error}
+    return {"ok": local_updated if restored else False, "mailbox_restored": restored and local_updated, "error": error or ("SafeApply could not save the Gmail restore result." if restored else "Gmail restoration was not completed.")}
 
 
 # =========================================================

@@ -44,7 +44,7 @@ class SpamActionRequest(BaseModel):
 class SpamActionResponse(BaseModel):
     ok: bool
     mailbox_moved: bool
-    local_quarantined: bool = True
+    local_quarantined: bool = False
     error: Optional[str] = None
     audit_id: Optional[str] = None
 

@@ -17,7 +17,7 @@ class EmailListItem(BaseModel):
     role_title: Optional[str] = "Not Specified"
     status: str = "unscanned"  # unscanned | scanned | error | applied | verified | quarantined
     folder: str = "inbox"      # inbox | spam
-    mailbox_action: str = "none" # none | moved_to_junk | move_failed | restored
+    mailbox_action: str = "none" # none | moved_to_spam | local_only | moved_to_junk (legacy) | move_failed | restored
     user_decision: str = "none"  # none | applied | ignored
     is_recruitment: bool = True
     risk_score: Optional[int] = None

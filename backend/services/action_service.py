@@ -23,9 +23,9 @@ class ActionService:
         last_audit_id = audits[-1]["id"] if audits else None
 
         return SpamActionResponse(
-            ok=res.get("ok", True),
+            ok=res.get("ok", False),
             mailbox_moved=res.get("mailbox_moved", False),
-            local_quarantined=True,
+            local_quarantined=res.get("local_quarantined", False),
             error=res.get("error"),
             audit_id=last_audit_id,
         )
